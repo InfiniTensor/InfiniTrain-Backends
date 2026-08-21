@@ -10,13 +10,13 @@
 #include <cub/block/block_reduce.cuh>
 #include <mcr/mc_runtime.h>
 
-#include "common/common_maca.h"
-#include "common/cub_compat.cuh"
-#include "common/kernel_helper.cuh"
 #include "infini_train/include/core/runtime/device_guard.h"
 #include "infini_train/include/dispatcher.h"
 #include "infini_train/include/tensor.h"
 
+#include "common/common_maca.h"
+#include "common/cub_compat.cuh"
+#include "common/kernel_helper.cuh"
 #include "runtime/maca_dispatch.h"
 #include "runtime/maca_runtime_common.h"
 
@@ -97,7 +97,8 @@ std::shared_ptr<Tensor> CrossEntropyForward(const std::shared_ptr<Tensor> &input
                                   infini_train::core::GetDeviceGuardImpl(device.type())->GetStream(device))
                                   ->maca_stream();
 
-    return core::maca::DispatchMacaFunc<DataTypeList<DataType::kUINT8, DataType::kINT64>, DataTypeList<INFINI_ALL_FLOATING_TYPES>>(
+    return core::maca::DispatchMacaFunc<DataTypeList<DataType::kUINT8, DataType::kINT64>,
+                                        DataTypeList<INFINI_ALL_FLOATING_TYPES>>(
         {target->Dtype(), input->Dtype()},
         [=]<typename Ttarget, typename Tinput>() {
             const Ttarget *target_ptr = static_cast<const Ttarget *>(target->DataPtr());
@@ -204,7 +205,8 @@ std::shared_ptr<Tensor> CrossEntropyBackward(const std::shared_ptr<Tensor> &inpu
                                   infini_train::core::GetDeviceGuardImpl(device.type())->GetStream(device))
                                   ->maca_stream();
 
-    core::maca::DispatchMacaFunc<DataTypeList<DataType::kUINT8, DataType::kINT64>, DataTypeList<INFINI_ALL_FLOATING_TYPES>>(
+    core::maca::DispatchMacaFunc<DataTypeList<DataType::kUINT8, DataType::kINT64>,
+                                 DataTypeList<INFINI_ALL_FLOATING_TYPES>>(
         {target->Dtype(), input_casted->Dtype()},
         [=]<typename Ttarget, typename Tinput>() {
             grad_input->Fill(0);

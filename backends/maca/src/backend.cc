@@ -13,17 +13,17 @@
 namespace infini_train::maca {
 
 void RegisterBackend() {
-  static std::once_flag once;
-  std::call_once(once, []() {
-    core::PrivateUse1BackendRegistration registration;
-    registration.name = "maca";
-    registration.register_runtime = &core::maca::RegisterMacaRuntime;
-    registration.register_kernels = &kernels::maca::RegisterMacaKernels;
+    static std::once_flag once;
+    std::call_once(once, []() {
+        core::PrivateUse1BackendRegistration registration;
+        registration.name = "maca";
+        registration.register_runtime = &core::maca::RegisterMacaRuntime;
+        registration.register_kernels = &kernels::maca::RegisterMacaKernels;
 #ifdef USE_MCCL
-    registration.register_ccl = &core::maca::RegisterMcclBackend;
+        registration.register_ccl = &core::maca::RegisterMcclBackend;
 #endif
-    core::RegisterPrivateUse1Backend(registration);
-  });
+        core::RegisterPrivateUse1Backend(registration);
+    });
 }
 
 } // namespace infini_train::maca

@@ -26,28 +26,28 @@ void RegisterTransformKernels();
 void RegisterVocabParallelCrossEntropyKernels();
 
 void RegisterMacaKernels() {
-  RegisterAccumulateGradKernels();
-  RegisterCastKernels();
-  RegisterCommKernels();
-  RegisterConcatKernels();
-  RegisterCrossEntropyKernels();
-  RegisterElementwiseKernels();
-  RegisterEmbeddingKernels();
-  RegisterFillKernels();
-  RegisterGatherKernels();
-  RegisterLayerNormKernels();
-  RegisterLinearKernels();
-  RegisterNoOpKernels();
-  RegisterOuterKernels();
-  RegisterReductionKernels();
-  RegisterScatterKernels();
-  RegisterSliceKernels();
-  RegisterSoftmaxKernels();
-  RegisterSplitKernels();
-  RegisterStackKernels();
-  RegisterTopKKernels();
-  RegisterTransformKernels();
-  RegisterVocabParallelCrossEntropyKernels();
+    RegisterAccumulateGradKernels();
+    RegisterCastKernels();
+    RegisterCommKernels();
+    RegisterConcatKernels();
+    RegisterCrossEntropyKernels();
+    RegisterElementwiseKernels();
+    RegisterEmbeddingKernels();
+    RegisterFillKernels();
+    RegisterGatherKernels();
+    RegisterLayerNormKernels();
+    RegisterLinearKernels();
+    RegisterNoOpKernels();
+    RegisterOuterKernels();
+    RegisterReductionKernels();
+    RegisterScatterKernels();
+    RegisterSliceKernels();
+    RegisterSoftmaxKernels();
+    RegisterSplitKernels();
+    RegisterStackKernels();
+    RegisterTopKKernels();
+    RegisterTransformKernels();
+    RegisterVocabParallelCrossEntropyKernels();
 }
 
 } // namespace infini_train::kernels::maca
