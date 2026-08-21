@@ -23,9 +23,9 @@ size_t McclUniqueId::Size() const { return sizeof(id_); }
 const void *McclUniqueId::Data() const { return &id_; }
 
 void McclUniqueId::Load(const void *src, size_t size) {
-  CHECK_NOTNULL(src);
-  CHECK_EQ(size, sizeof(id_));
-  std::memcpy(&id_, src, sizeof(id_));
+    CHECK_NOTNULL(src);
+    CHECK_EQ(size, sizeof(id_));
+    std::memcpy(&id_, src, sizeof(id_));
 }
 
 mcclUniqueId *McclUniqueId::mccl_unique_id() { return &id_; }

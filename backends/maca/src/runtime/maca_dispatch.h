@@ -15,48 +15,39 @@
 //   FP16 -> __half, BF16 -> __maca_bfloat16
 // -----------------------------------------------------------------------------
 namespace infini_train::core {
-template <>
-struct BackendTypeMap<Device::DeviceType::kPrivateUse1, DataType::kFLOAT16> {
-  using type = __half;
+template <> struct BackendTypeMap<Device::DeviceType::kPrivateUse1, DataType::kFLOAT16> {
+    using type = __half;
 };
 
-template <>
-struct BackendTypeMap<Device::DeviceType::kPrivateUse1, DataType::kBFLOAT16> {
-  using type = __maca_bfloat16;
+template <> struct BackendTypeMap<Device::DeviceType::kPrivateUse1, DataType::kBFLOAT16> {
+    using type = __maca_bfloat16;
 };
 } // namespace infini_train::core
 
 // Register all standard (non-low-precision) dtypes for the MACA backend.
 // FP16/BF16 are registered explicitly above with their MACA-native scalar
 // types.
-INFINI_REGISTER_STANDARD_BACKEND_TYPES(
-    infini_train::Device::DeviceType::kPrivateUse1)
+INFINI_REGISTER_STANDARD_BACKEND_TYPES(infini_train::Device::DeviceType::kPrivateUse1)
 
 namespace infini_train::core::maca {
 
-template <DataType DType>
-struct MacaTypeMap : BackendTypeMap<Device::DeviceType::kPrivateUse1, DType> {};
+template <DataType DType> struct MacaTypeMap : BackendTypeMap<Device::DeviceType::kPrivateUse1, DType> {};
 
 // -----------------------------------------------------------------------------
 // MACA dispatch helpers
 // -----------------------------------------------------------------------------
 
 template <DataType... AllowedDTypes, typename Functor, typename... Args>
-auto DispatchMacaFunc(DataType dtype, Functor &&func,
-                      std::string_view context_identifier = "",
-                      Args &&...args) {
-  return infini_train::DispatchByTypeMap<MacaTypeMap, AllowedDTypes...>(
-      dtype, std::forward<Functor>(func), context_identifier,
-      std::forward<Args>(args)...);
+auto DispatchMacaFunc(DataType dtype, Functor &&func, std::string_view context_identifier = "", Args &&...args) {
+    return infini_train::DispatchByTypeMap<MacaTypeMap, AllowedDTypes...>(
+        dtype, std::forward<Functor>(func), context_identifier, std::forward<Args>(args)...);
 }
 
 template <typename... AllowedTypeLists, typename Functor, typename... Args>
-auto DispatchMacaFunc(const std::vector<DataType> &dtypes, Functor &&func,
-                      std::string_view context_identifier = "",
+auto DispatchMacaFunc(const std::vector<DataType> &dtypes, Functor &&func, std::string_view context_identifier = "",
                       Args &&...args) {
-  return infini_train::DispatchByTypeMap<MacaTypeMap, AllowedTypeLists...>(
-      dtypes, std::forward<Functor>(func), context_identifier,
-      std::forward<Args>(args)...);
+    return infini_train::DispatchByTypeMap<MacaTypeMap, AllowedTypeLists...>(
+        dtypes, std::forward<Functor>(func), context_identifier, std::forward<Args>(args)...);
 }
 
 } // namespace infini_train::core::maca

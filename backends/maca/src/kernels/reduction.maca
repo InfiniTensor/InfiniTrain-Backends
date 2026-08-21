@@ -8,13 +8,13 @@
 
 #include <cub/cub.cuh>
 
-#include "common/common_maca.h"
-#include "common/cub_compat.cuh"
-#include "common/kernel_helper.cuh"
 #include "infini_train/include/core/runtime/device_guard.h"
 #include "infini_train/include/dispatcher.h"
 #include "infini_train/include/tensor.h"
 
+#include "common/common_maca.h"
+#include "common/cub_compat.cuh"
+#include "common/kernel_helper.cuh"
 #include "runtime/maca_dispatch.h"
 #include "runtime/maca_runtime_common.h"
 
@@ -242,12 +242,9 @@ namespace infini_train::kernels::maca {
 void RegisterReductionKernels() {
     REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MeanForward,
                     infini_train::kernels::maca::MeanForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SumForward,
-                    infini_train::kernels::maca::SumForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaxForward,
-                    infini_train::kernels::maca::MaxForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MinForward,
-                    infini_train::kernels::maca::MinForward)
+    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SumForward, infini_train::kernels::maca::SumForward)
+    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaxForward, infini_train::kernels::maca::MaxForward)
+    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MinForward, infini_train::kernels::maca::MinForward)
     REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MeanBackward,
                     infini_train::kernels::maca::MeanBackward)
     REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SumBackward,

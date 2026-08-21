@@ -74,10 +74,8 @@ namespace infini_train::kernels::maca {
 void RegisterCommKernels() {
     REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CommBroadcast,
                     infini_train::kernels::maca::Broadcast)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CommScatter,
-                    infini_train::kernels::maca::Scatter)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CommGather,
-                    infini_train::kernels::maca::Gather)
+    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CommScatter, infini_train::kernels::maca::Scatter)
+    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CommGather, infini_train::kernels::maca::Gather)
     REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CommReduceAddCoalesced,
                     infini_train::kernels::maca::ReduceAddCoalesced)
 }
