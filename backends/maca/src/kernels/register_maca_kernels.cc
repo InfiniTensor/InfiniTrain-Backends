@@ -4,7 +4,6 @@ namespace infini_train::kernels::maca {
 
 void RegisterAccumulateGradKernels();
 void RegisterCastKernels();
-void RegisterCommKernels();
 void RegisterConcatKernels();
 void RegisterCrossEntropyKernels();
 void RegisterElementwiseKernels();
@@ -28,7 +27,6 @@ void RegisterVocabParallelCrossEntropyKernels();
 void RegisterMacaKernels() {
     RegisterAccumulateGradKernels();
     RegisterCastKernels();
-    RegisterCommKernels();
     RegisterConcatKernels();
     RegisterCrossEntropyKernels();
     RegisterElementwiseKernels();

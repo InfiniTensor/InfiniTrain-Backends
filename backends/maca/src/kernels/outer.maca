@@ -59,6 +59,8 @@ std::shared_ptr<Tensor> OuterForward(const std::shared_ptr<Tensor> &input, const
                                                     MCBLAS_GEMM_DEFAULT));
                       }),
                       DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(input->Dtype(), "MACA OuterForward");
     }
 
     return output;
@@ -94,14 +96,6 @@ std::tuple<std::shared_ptr<Tensor>, std::shared_ptr<Tensor>> OuterBackward(const
     auto output_dtype = (promoted_type == DataType::kBFLOAT16) ? DataType::kFLOAT32 : promoted_type;
     auto grad_input = std::make_shared<Tensor>(std::vector<int64_t>{M}, output_dtype, grad_output->GetDevice());
     auto grad_other = std::make_shared<Tensor>(std::vector<int64_t>{N}, output_dtype, grad_output->GetDevice());
-
-    core::maca::DispatchMacaFunc<DataType::kFLOAT32, DataType::kBFLOAT16>(
-        promoted_type,
-        [=]<typename T>() {
-            grad_input->Fill(0);
-            grad_other->Fill(0);
-        },
-        "MACA OuterBackward");
 
     auto device = input->GetDevice();
     float alpha = 1.0f;
@@ -152,6 +146,8 @@ std::tuple<std::shared_ptr<Tensor>, std::shared_ptr<Tensor>> OuterBackward(const
                                           grad_other->DataPtr(), MACA_R_32F, 1, MACA_R_32F, MCBLAS_GEMM_DEFAULT));
             }),
             DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(promoted_type, "MACA OuterBackward");
     }
 
     return {grad_input, grad_other};

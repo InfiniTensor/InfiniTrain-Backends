@@ -17,6 +17,7 @@ void RegisterBackend() {
     std::call_once(once, []() {
         core::PrivateUse1BackendRegistration registration;
         registration.name = "maca";
+        registration.default_autocast_dtype = DataType::kBFLOAT16;
         registration.register_runtime = &core::maca::RegisterMacaRuntime;
         registration.register_kernels = &kernels::maca::RegisterMacaKernels;
 #ifdef USE_MCCL

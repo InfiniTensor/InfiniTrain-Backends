@@ -79,8 +79,9 @@ def format_file(file: Path, check: bool, formatter) -> bool:
                 print(f"{Fore.CYAN}Formatted: {file}{Style.RESET_ALL}")
     except FileNotFoundError:
         print(
-            f"{Fore.RED}Formatter {formatter} not found, {file} skipped.{Style.RESET_ALL}"
+            f"{Fore.RED}Formatter {formatter} not found.{Style.RESET_ALL}"
         )
+        return False
     except subprocess.CalledProcessError as e:
         print(f"{Fore.RED}Formatter {formatter} failed: {e}{Style.RESET_ALL}")
 

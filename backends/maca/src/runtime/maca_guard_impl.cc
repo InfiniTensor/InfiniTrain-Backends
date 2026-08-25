@@ -126,6 +126,9 @@ void MacaGuardImpl::InitSingleHandle(Device device) {
 
 void MacaGuardImpl::Initialize() {
     std::call_once(initialize_flag_, [] {
+        // FIXME(cx): Stop deriving runtime policy from argv and mutating process-wide
+        // environment here. Pass MACA runtime/communication policy through explicit
+        // provider or launcher configuration instead.
         // Apply provider runtime policy immediately before mcInit. Users may
         // override it in the process environment before first device use.
         setenv("MACA_LAUNCH_BLOCKING", "1", 0);

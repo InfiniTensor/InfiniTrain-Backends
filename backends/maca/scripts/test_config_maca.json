@@ -14,8 +14,8 @@
         "RUN_PROFILE_TEST": "true",
         "CKPT_ROOT_DIR": "/tmp/infini_train_maca_ckpt",
         "DEVICE_BACKEND": "maca",
-        "GPT2_TEST_GROUPS": "basic,zero,lora",
-        "LLAMA3_TEST_GROUPS": "basic,zero,lora",
+        "GPT2_TEST_GROUPS": "basic,zero,lora,8_proc",
+        "LLAMA3_TEST_GROUPS": "basic,zero,lora,8_proc",
         "MIXTRAL_TEST_GROUPS": "moe"
     },
     "basic_compile_commands": [
@@ -561,6 +561,130 @@
                         "num_iteration": 10,
                         "global_batch_size": 80,
                         "micro_batch_size": 80
+                    }
+                }
+            ]
+        },
+        {
+            "tag": "8_proc",
+            "infini_run_args": {
+                "nproc_per_node": 8
+            },
+            "tests": [
+                {
+                    "id": "3_8proc",
+                    "args": {
+                        "dtype": "float32",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 10,
+                        "total_batch_size": 5120
+                    }
+                },
+                {
+                    "id": "3_bfloat16_8proc",
+                    "args": {
+                        "dtype": "bfloat16",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 10,
+                        "total_batch_size": 5120
+                    }
+                },
+                {
+                    "id": "4_8proc",
+                    "args": {
+                        "dtype": "float32",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 40,
+                        "total_batch_size": 5120,
+                        "tensor_parallel": 4
+                    }
+                },
+                {
+                    "id": "4_bfloat16_8proc",
+                    "args": {
+                        "dtype": "bfloat16",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 40,
+                        "total_batch_size": 5120,
+                        "tensor_parallel": 4
+                    }
+                },
+                {
+                    "id": "5_8proc",
+                    "args": {
+                        "dtype": "float32",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 40,
+                        "total_batch_size": 5120,
+                        "tensor_parallel": 4,
+                        "sequence_parallel": true
+                    }
+                },
+                {
+                    "id": "5_bfloat16_8proc",
+                    "args": {
+                        "dtype": "bfloat16",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 40,
+                        "total_batch_size": 5120,
+                        "tensor_parallel": 4,
+                        "sequence_parallel": true
+                    }
+                },
+                {
+                    "id": "6_8proc",
+                    "args": {
+                        "dtype": "float32",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 10,
+                        "total_batch_size": 5120,
+                        "pipeline_parallel": 8
+                    }
+                },
+                {
+                    "id": "6_bfloat16_8proc",
+                    "args": {
+                        "dtype": "bfloat16",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 10,
+                        "total_batch_size": 5120,
+                        "pipeline_parallel": 8
+                    }
+                },
+                {
+                    "id": "8_8proc",
+                    "args": {
+                        "dtype": "float32",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 40,
+                        "total_batch_size": 5120,
+                        "tensor_parallel": 2,
+                        "sequence_parallel": true,
+                        "pipeline_parallel": 2,
+                        "virtual_pipeline_parallel": 2
+                    }
+                },
+                {
+                    "id": "8_bfloat16_8proc",
+                    "args": {
+                        "dtype": "bfloat16",
+                        "nthread_per_process": 1,
+                        "num_iteration": 10,
+                        "batch_size": 40,
+                        "total_batch_size": 5120,
+                        "tensor_parallel": 2,
+                        "sequence_parallel": true,
+                        "pipeline_parallel": 2,
+                        "virtual_pipeline_parallel": 2
                     }
                 }
             ]

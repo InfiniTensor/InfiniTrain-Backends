@@ -35,7 +35,8 @@ std::shared_ptr<Tensor> MatmulForward(const std::shared_ptr<Tensor> &input, cons
     CHECK_EQ(k, other_dims[other_dims.size() - 2]);
     const int64_t n = other_dims[other_dims.size() - 1];
 
-    const int64_t bs = std::accumulate(input_dims.rbegin() + 2, input_dims.rend(), 1, std::multiplies<int64_t>{});
+    const int64_t bs
+        = std::accumulate(input_dims.rbegin() + 2, input_dims.rend(), int64_t{1}, std::multiplies<int64_t>{});
     for (int64_t i = 0; i < input_dims.size() - 2; ++i) {
         CHECK_EQ(input_dims[i], other_dims[i]) << "Batch dims must match";
     }
@@ -60,9 +61,9 @@ std::shared_ptr<Tensor> MatmulForward(const std::shared_ptr<Tensor> &input, cons
     int lda = n;
     int ldb = k;
     int ldc = n;
-    int64_t stride_a = n * k;
-    int64_t stride_b = k * m;
-    int64_t stride_c = m * n;
+    int64_t stride_a = bs > 1 ? n * k : 0;
+    int64_t stride_b = bs > 1 ? k * m : 0;
+    int64_t stride_c = bs > 1 ? m * n : 0;
     // NOTE(zbl): the last mcblasGemmAlgo_t param has no effect on GPU arch >= sm_80(Ampere)
 
     switch (dtype) {
@@ -101,8 +102,8 @@ std::shared_ptr<Tensor> MatmulBackwardInput(const std::shared_ptr<Tensor> &other
     const int64_t n = other_dims[other_dims.size() - 1];
     CHECK_EQ(n, grad_output_dims[grad_output_dims.size() - 1]);
 
-    const int64_t bs
-        = std::accumulate(grad_output_dims.rbegin() + 2, grad_output_dims.rend(), 1, std::multiplies<int64_t>{});
+    const int64_t bs = std::accumulate(grad_output_dims.rbegin() + 2, grad_output_dims.rend(), int64_t{1},
+                                       std::multiplies<int64_t>{});
     for (int64_t i = 0; i < static_cast<int64_t>(grad_output_dims.size()) - 2; ++i) {
         CHECK_EQ(grad_output_dims[i], other_dims[i]) << "Batch dims must match";
     }
@@ -123,9 +124,9 @@ std::shared_ptr<Tensor> MatmulBackwardInput(const std::shared_ptr<Tensor> &other
                                 ->mcblas_handle();
 
     const int lda = n, ldb = n, ldc = k;
-    const int64_t stride_a = k * n;
-    const int64_t stride_b = n * m;
-    const int64_t stride_c = m * k;
+    const int64_t stride_a = bs > 1 ? k * n : 0;
+    const int64_t stride_b = bs > 1 ? n * m : 0;
+    const int64_t stride_c = bs > 1 ? m * k : 0;
     switch (compute_dtype) {
         DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
                           handle, MCBLAS_OP_T, MCBLAS_OP_N, k, m, n, &alpha, other->DataPtr(), MACA_R_32F, lda,
@@ -137,6 +138,8 @@ std::shared_ptr<Tensor> MatmulBackwardInput(const std::shared_ptr<Tensor> &other
                           stride_a, grad_output_promoted->DataPtr(), MACA_R_16BF, ldb, stride_b, &beta,
                           grad_input->DataPtr(), MACA_R_32F, ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
                       DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA MatmulBackwardInput");
     }
 
     return grad_input;
@@ -161,7 +164,8 @@ std::shared_ptr<Tensor> MatmulBackwardOther(const std::shared_ptr<Tensor> &input
     CHECK_EQ(m, grad_output_dims[grad_output_dims.size() - 2]);
     CHECK_EQ(k, other_dims[other_dims.size() - 2]);
 
-    const int64_t bs = std::accumulate(input_dims.rbegin() + 2, input_dims.rend(), 1, std::multiplies<int64_t>{});
+    const int64_t bs
+        = std::accumulate(input_dims.rbegin() + 2, input_dims.rend(), int64_t{1}, std::multiplies<int64_t>{});
     for (int64_t i = 0; i < static_cast<int64_t>(input_dims.size()) - 2; ++i) {
         CHECK_EQ(input_dims[i], grad_output_dims[i]) << "Batch dims must match";
         CHECK_EQ(input_dims[i], other_dims[i]) << "Batch dims must match";
@@ -183,9 +187,9 @@ std::shared_ptr<Tensor> MatmulBackwardOther(const std::shared_ptr<Tensor> &input
                                 ->mcblas_handle();
 
     const int lda = n, ldb = k, ldc = n;
-    const int64_t stride_a = n * m;
-    const int64_t stride_b = k * m;
-    const int64_t stride_c = n * k;
+    const int64_t stride_a = bs > 1 ? n * m : 0;
+    const int64_t stride_b = bs > 1 ? k * m : 0;
+    const int64_t stride_c = bs > 1 ? n * k : 0;
     switch (compute_dtype) {
         DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
                           handle, MCBLAS_OP_N, MCBLAS_OP_T, n, k, m, &alpha, grad_output_promoted->DataPtr(),
@@ -197,6 +201,8 @@ std::shared_ptr<Tensor> MatmulBackwardOther(const std::shared_ptr<Tensor> &input
                           MACA_R_16BF, lda, stride_a, input->DataPtr(), MACA_R_16BF, ldb, stride_b, &beta,
                           grad_other->DataPtr(), MACA_R_32F, ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
                       DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA MatmulBackwardOther");
     }
 
     return grad_other;
@@ -224,7 +230,8 @@ std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, cons
 
     const auto &input_dims = input->Dims();
     CHECK_GE(input_dims.size(), 2);
-    const int64_t bs = std::accumulate(input_dims.rbegin() + 1, input_dims.rend(), 1, std::multiplies<int64_t>{});
+    const int64_t bs
+        = std::accumulate(input_dims.rbegin() + 1, input_dims.rend(), int64_t{1}, std::multiplies<int64_t>{});
     const int64_t in_features = *input_dims.rbegin();
 
     const auto &weight_dims = weight->Dims();
@@ -249,6 +256,7 @@ std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, cons
                                   infini_train::core::GetDeviceGuardImpl(device.type())->GetStream(device))
                                   ->maca_stream();
 
+    const float beta = bias ? 1.0f : 0.0f;
     if (bias) {
         CHECK_EQ(bias->Dims().size(), 1);
         CHECK_EQ(bias->Dims()[0], out_features);
@@ -262,13 +270,9 @@ std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, cons
                     static_cast<T *>(output->DataPtr()), static_cast<const T *>(bias->DataPtr()), bs, out_features);
             },
             "MACA LinearForward");
-    } else {
-        core::maca::DispatchMacaFunc<DataType::kFLOAT32, DataType::kBFLOAT16>(
-            input->Dtype(), [=]<typename T>() { output->Fill(0); }, "MACA LinearForward");
     }
 
     const float alpha = 1.0f;
-    const float beta = 1.0f;
     auto trans_a = transpose ? MCBLAS_OP_T : MCBLAS_OP_N;
     auto trans_b = MCBLAS_OP_N;
     auto lda = transpose ? in_features : out_features;
@@ -305,28 +309,30 @@ std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, cons
                                                     MACA_R_32F, MCBLAS_GEMM_DEFAULT));
                       }),
                       DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(dtype, "MACA LinearForward");
     }
 
     return output;
 }
 
 template <int BLOCK_SIZE, typename TIn, typename TOut>
-__global__ void ReduceColumnsKernel(const TIn *__restrict__ input, TOut *__restrict__ output, int num_rows,
-                                    int num_cols) {
+__global__ void ReduceRowsKernel(const TIn *__restrict__ input, TOut *__restrict__ output, int64_t num_rows,
+                                 int64_t num_cols) {
     using BlockReduce = cub::BlockReduce<float, BLOCK_SIZE>;
     __shared__ typename BlockReduce::TempStorage temp_storage;
 
-    int row = blockIdx.x;
+    const int64_t col = blockIdx.x;
     float sum = 0.0f;
 
-    for (int col = threadIdx.x; col < num_cols; col += blockDim.x) {
+    for (int64_t row = threadIdx.x; row < num_rows; row += blockDim.x) {
         sum += common::maca::Cast<float>(input[row * num_cols + col]);
     }
 
     float reduced = BlockReduce(temp_storage).Sum(sum);
 
     if (threadIdx.x == 0) {
-        output[row] = reduced;
+        output[col] = common::maca::Cast<TOut>(reduced);
     }
 }
 
@@ -335,7 +341,8 @@ std::shared_ptr<Tensor> LinearBackwardInput(const std::shared_ptr<Tensor> &weigh
                                             int64_t in_features, int64_t out_features,
                                             const std::vector<int64_t> &input_dims) {
     CHECK_GE(input_dims.size(), 2);
-    const int64_t bs = std::accumulate(input_dims.rbegin() + 1, input_dims.rend(), 1, std::multiplies<int64_t>{});
+    const int64_t bs
+        = std::accumulate(input_dims.rbegin() + 1, input_dims.rend(), int64_t{1}, std::multiplies<int64_t>{});
 
     auto compute_dtype = weight->Dtype();
     auto grad_output_dtype = grad_output->Dtype();
@@ -373,6 +380,8 @@ std::shared_ptr<Tensor> LinearBackwardInput(const std::shared_ptr<Tensor> &weigh
                               grad_input->DataPtr(), MACA_R_32F, in_features, MACA_R_32F, MCBLAS_GEMM_DEFAULT));
                       }),
                       DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA LinearBackwardInput");
     }
 
     return grad_input;
@@ -383,8 +392,8 @@ std::shared_ptr<Tensor> LinearBackwardWeight(const std::shared_ptr<Tensor> &inpu
                                              int64_t in_features, int64_t out_features) {
     const auto &grad_output_dims = grad_output->Dims();
     CHECK_GE(grad_output_dims.size(), 2);
-    const int64_t bs
-        = std::accumulate(grad_output_dims.rbegin() + 1, grad_output_dims.rend(), 1, std::multiplies<int64_t>{});
+    const int64_t bs = std::accumulate(grad_output_dims.rbegin() + 1, grad_output_dims.rend(), int64_t{1},
+                                       std::multiplies<int64_t>{});
 
     auto compute_dtype = input->Dtype();
     auto grad_output_dtype = grad_output->Dtype();
@@ -425,6 +434,8 @@ std::shared_ptr<Tensor> LinearBackwardWeight(const std::shared_ptr<Tensor> &inpu
                                                     ldc, MACA_R_32F, MCBLAS_GEMM_DEFAULT));
                       }),
                       DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA LinearBackwardWeight");
     }
 
     return grad_weight;
@@ -433,7 +444,8 @@ std::shared_ptr<Tensor> LinearBackwardWeight(const std::shared_ptr<Tensor> &inpu
 std::shared_ptr<Tensor> LinearBackwardBias(const std::shared_ptr<Tensor> &grad_output, int64_t out_features) {
     const auto &dims = grad_output->Dims();
     CHECK_GE(dims.size(), 2);
-    const int64_t bs = std::accumulate(dims.rbegin() + 1, dims.rend(), 1, std::multiplies<int64_t>{});
+    CHECK_EQ(dims.back(), out_features);
+    const int64_t bs = std::accumulate(dims.rbegin() + 1, dims.rend(), int64_t{1}, std::multiplies<int64_t>{});
 
     auto compute_dtype = grad_output->Dtype();
     // FIXME(cx): output dtype promotion is a temporary hack; revisit when autograd/autocast is fixed.
@@ -449,17 +461,19 @@ std::shared_ptr<Tensor> LinearBackwardBias(const std::shared_ptr<Tensor> &grad_o
     constexpr int BLOCK_SIZE = 256;
     switch (compute_dtype) {
         DISPATCH_CASE(WRAP({
-                          ReduceColumnsKernel<BLOCK_SIZE><<<out_features, BLOCK_SIZE, 0, maca_stream>>>(
+                          ReduceRowsKernel<BLOCK_SIZE><<<out_features, BLOCK_SIZE, 0, maca_stream>>>(
                               static_cast<const float *>(grad_output->DataPtr()),
-                              static_cast<float *>(grad_bias->DataPtr()), out_features, bs);
+                              static_cast<float *>(grad_bias->DataPtr()), bs, out_features);
                       }),
                       DataType::kFLOAT32)
         DISPATCH_CASE(WRAP({
-                          ReduceColumnsKernel<BLOCK_SIZE><<<out_features, BLOCK_SIZE, 0, maca_stream>>>(
+                          ReduceRowsKernel<BLOCK_SIZE><<<out_features, BLOCK_SIZE, 0, maca_stream>>>(
                               static_cast<const __maca_bfloat16 *>(grad_output->DataPtr()),
-                              static_cast<float *>(grad_bias->DataPtr()), out_features, bs);
+                              static_cast<float *>(grad_bias->DataPtr()), bs, out_features);
                       }),
                       DataType::kBFLOAT16)
+    default:
+        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA LinearBackwardBias");
     }
 
     return grad_bias;

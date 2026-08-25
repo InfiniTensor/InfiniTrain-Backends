@@ -51,12 +51,15 @@ export MACA_PATH=/opt/maca
 
 mkdir build
 cd build
-cmake .. -DINFINITRAIN_BACKEND=maca -DINFINITRAIN_MACA_WITH_MCCL=ON
+cmake .. \
+  -DINFINITRAIN_BACKEND=maca \
+  -DINFINITRAIN_MACA_WITH_MCCL=ON \
+  -DBUILD_TEST=ON
 make -j
 ```
 
-Top-level builds enable the backend examples and hardware tests by default.
-The example executables are written to `build`:
+Top-level builds enable the backend examples by default. The example
+executables are written to `build`:
 
 ```bash
 ./gpt2 --help
@@ -64,7 +67,7 @@ The example executables are written to `build`:
 ./mixtral --help
 ```
 
-Run the registered MACA hardware tests with CTest:
+Run the registered MACA accelerator tests with CTest:
 
 ```bash
 ctest -L maca --output-on-failure
@@ -101,10 +104,10 @@ backends/maca/scripts/run_models_and_profile.bash --only-run basic
 
 | Option | Default | Description |
 | ------ | ------- | ----------- |
-| `INFINITRAIN_BACKEND` | `maca` | Provider selected from `backends/<provider>` |
+| `INFINITRAIN_BACKEND` | Required | Provider selected from `backends/<provider>` |
 | `INFINITRAIN_SOURCE_DIR` | `third_party/InfiniTrain` | InfiniTrain source tree, normally the pinned submodule |
 | `INFINITRAIN_BACKENDS_BUILD_EXAMPLES` | `ON` for a top-level build | Build provider-enabled InfiniTrain examples |
-| `INFINITRAIN_BACKENDS_BUILD_TESTS` | `ON` for a top-level build | Build and register provider hardware tests |
+| `BUILD_TEST` | `OFF` | Build InfiniTrain's full test set and MACA variants |
 | `INFINITRAIN_MACA_WITH_MCCL` | `ON` | Enable MCCL distributed collectives |
 | `MACA_PATH` | `$MACA_PATH` | MACA SDK root |
 
@@ -131,6 +134,24 @@ cmake .. \
 
 The selected checkout must implement the PrivateUse1 extension API expected by
 this backend.
+
+To instantiate the shared accelerator tests, configure with `BUILD_TEST=ON`.
+PrivateUse1 providers require `USE_CUDA=OFF`; configuration fails rather than
+silently overriding an explicit `USE_CUDA=ON`. Their test identity is always
+PrivateUse1, independent of the selected provider:
+
+```bash
+cmake .. -DBUILD_TEST=ON
+cmake --build . --target test_tensor_maca test_autograd_maca
+ctest -L maca --output-on-failure
+```
+
+The generated binaries are named `test_*_maca`, contain only
+`PRIVATEUSE1/*` GTest instances, and carry the `maca`, `accelerator`, and
+`hardware` CTest labels. The same build also contains InfiniTrain's CPU,
+fake-provider, and CPU-only tests; CUDA remains disabled by the PrivateUse1
+configuration contract. Use `ctest -L cpu` for the upstream CPU tests, or run
+`ctest --output-on-failure` without `-L` to execute the complete registered set.
 
 ## Using the MACA Backend
 
@@ -184,8 +205,7 @@ backends/<provider>/
   src/kernels/           provider kernel implementations and registration
   src/ccl/               optional collective communication integration
   examples/              CMake adapters for upstream InfiniTrain examples
-  tests/                 provider hardware tests
-  scripts/               provider test configuration and runner wrappers
+  scripts/               provider model-run configuration and wrappers
 
 third_party/InfiniTrain/ framework source, normally a pinned git submodule
 ```
