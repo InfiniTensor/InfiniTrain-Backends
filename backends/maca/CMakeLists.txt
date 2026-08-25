@@ -72,12 +72,24 @@ target_link_libraries(infini_train_backend_maca_executable INTERFACE
   "-Wl,--end-group"
 )
 
-if(INFINITRAIN_BACKENDS_BUILD_TESTS)
-  add_executable(test_maca_allocator tests/test_maca_allocator.cc)
-  target_link_libraries(test_maca_allocator PRIVATE
-    InfiniTrain::Backend::MACAExecutable)
-  add_test(NAME maca_allocator COMMAND $<TARGET_FILE:test_maca_allocator>)
-  set_tests_properties(maca_allocator PROPERTIES LABELS "maca;hardware")
+if(BUILD_TEST)
+  if(NOT COMMAND infini_train_add_privateuse1_test_suites)
+    message(FATAL_ERROR
+      "The selected InfiniTrain revision does not provide PrivateUse1 test suites. "
+      "Update INFINITRAIN_SOURCE_DIR or the pinned submodule revision.")
+  endif()
+
+  # The target suffix and CTest label identify this provider; execution still
+  # uses the backend-neutral PrivateUse1 device and GTest prefix.
+  infini_train_add_privateuse1_test_suites(
+    BACKEND_NAME ${INFINITRAIN_BACKEND}
+    DEVICE_INDEX 0
+    LINK_LIBRARIES InfiniTrain::Backend::MACAExecutable
+    BACKEND_HEADER "infini_train_maca/backend.h"
+    BACKEND_REGISTRAR infini_train::maca::RegisterBackend
+    TEST_TIMEOUT 300
+    RUN_SERIAL
+  )
 endif()
 
 if(INFINITRAIN_BACKENDS_BUILD_EXAMPLES)
