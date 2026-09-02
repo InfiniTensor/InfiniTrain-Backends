@@ -20,7 +20,7 @@
 
 namespace infini_train::kernels::maca {
 namespace {
-__host__ __device__ constexpr float kInfinity = std::numeric_limits<float>::infinity();
+constexpr float kInfinity = std::numeric_limits<float>::infinity();
 } // namespace
 
 namespace {
