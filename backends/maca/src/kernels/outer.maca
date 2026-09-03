@@ -12,6 +12,7 @@
 #include "infini_train/include/dispatcher.h"
 #include "infini_train/include/tensor.h"
 
+#include "kernels/common/gemm.h"
 #include "runtime/maca_dispatch.h"
 #include "runtime/maca_runtime_common.h"
 
@@ -38,30 +39,25 @@ std::shared_ptr<Tensor> OuterForward(const std::shared_ptr<Tensor> &input, const
     // reinterpret other: [N] as row vector [1, N]
     // output[M, N] = input[M, 1] * other.T[1, N]
     // output.T[N, M] = other[N, 1] * input.T[1, M]
-    float alpha = 1.0f;
-    float beta = 0.0f;
-    mcblasHandle_t handle = dynamic_cast<infini_train::core::maca::MacaBlasHandle *>(
-                                infini_train::core::GetDeviceGuardImpl(device.type())->GetBlasHandle(device))
-                                ->mcblas_handle();
-
-    switch (input->Dtype()) {
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasSgemm(handle, MCBLAS_OP_N, MCBLAS_OP_N, N, M, 1, &alpha,
-                                                   static_cast<const float *>(other->DataPtr()), N,
-                                                   static_cast<const float *>(input->DataPtr()), 1, &beta,
-                                                   static_cast<float *>(output->DataPtr()), N));
-                      }),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasGemmEx(handle, MCBLAS_OP_N, MCBLAS_OP_N, N, M, 1, &alpha, other->DataPtr(),
-                                                    MACA_R_16BF, N, input->DataPtr(), MACA_R_16BF, 1, &beta,
-                                                    output->DataPtr(), MACA_R_16BF, N, MACA_R_32F,
-                                                    MCBLAS_GEMM_DEFAULT));
-                      }),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(input->Dtype(), "MACA OuterForward");
-    }
+    Dispatcher::Instance().Call<void>({device.type(), "Gemm"}, device,
+                                      GemmParams{
+                                          .trans_a = GemmTranspose::kNoTranspose,
+                                          .trans_b = GemmTranspose::kNoTranspose,
+                                          .m = static_cast<int>(N),
+                                          .n = static_cast<int>(M),
+                                          .k = 1,
+                                          .A = other->DataPtr(),
+                                          .lda = static_cast<int>(N),
+                                          .B = input->DataPtr(),
+                                          .ldb = 1,
+                                          .C = output->DataPtr(),
+                                          .ldc = static_cast<int>(N),
+                                          .alpha = 1.0f,
+                                          .beta = 0.0f,
+                                          .batch_count = 1,
+                                          .input_dtype = input->Dtype(),
+                                          .output_dtype = output->Dtype(),
+                                      });
 
     return output;
 }
@@ -126,24 +122,56 @@ std::tuple<std::shared_ptr<Tensor>, std::shared_ptr<Tensor>> OuterBackward(const
                       }),
                       DataType::kFLOAT32)
         DISPATCH_CASE(
-            // cublas<t>gemv does not support bf16, use mcblasGemmEx to workaround
+            // mcblasSgemv does not support bf16; use the generic GEMM kernel instead.
             WRAP({
                 // grad_input[M, 1] = grad_output[M, N] × other[N, 1]
                 // grad_input.T[1, M] = other.T[1, N] × grad_output.T[N, M]
                 // C = grad_input.T[1, M]
                 // A = other.T[1, N]
                 // B = grad_output.T[N, M]
-                MCBLAS_CHECK(mcblasGemmEx(handle, MCBLAS_OP_N, MCBLAS_OP_N, 1, M, N, &alpha, other_promoted->DataPtr(),
-                                          MACA_R_16BF, 1, grad_output_promoted->DataPtr(), MACA_R_16BF, N, &beta,
-                                          grad_input->DataPtr(), MACA_R_32F, 1, MACA_R_32F, MCBLAS_GEMM_DEFAULT));
+                Dispatcher::Instance().Call<void>({device.type(), "Gemm"}, device,
+                                                  GemmParams{
+                                                      .trans_a = GemmTranspose::kNoTranspose,
+                                                      .trans_b = GemmTranspose::kNoTranspose,
+                                                      .m = 1,
+                                                      .n = static_cast<int>(M),
+                                                      .k = static_cast<int>(N),
+                                                      .A = other_promoted->DataPtr(),
+                                                      .lda = 1,
+                                                      .B = grad_output_promoted->DataPtr(),
+                                                      .ldb = static_cast<int>(N),
+                                                      .C = grad_input->DataPtr(),
+                                                      .ldc = 1,
+                                                      .alpha = 1.0f,
+                                                      .beta = 0.0f,
+                                                      .batch_count = 1,
+                                                      .input_dtype = promoted_type,
+                                                      .output_dtype = output_dtype,
+                                                  });
                 // grad_other[N, 1] = grad_output.T[N, M] × input[M, 1]
                 // grad_other.T[1, N] = input.T[1, M] × grad_output[M, N]
                 // C = grad_other.T[1, N]
                 // A = input.T[1, M]
                 // B = grad_output.T[N, M]
-                MCBLAS_CHECK(mcblasGemmEx(handle, MCBLAS_OP_N, MCBLAS_OP_T, 1, N, M, &alpha, input_promoted->DataPtr(),
-                                          MACA_R_16BF, 1, grad_output_promoted->DataPtr(), MACA_R_16BF, N, &beta,
-                                          grad_other->DataPtr(), MACA_R_32F, 1, MACA_R_32F, MCBLAS_GEMM_DEFAULT));
+                Dispatcher::Instance().Call<void>({device.type(), "Gemm"}, device,
+                                                  GemmParams{
+                                                      .trans_a = GemmTranspose::kNoTranspose,
+                                                      .trans_b = GemmTranspose::kTranspose,
+                                                      .m = 1,
+                                                      .n = static_cast<int>(N),
+                                                      .k = static_cast<int>(M),
+                                                      .A = input_promoted->DataPtr(),
+                                                      .lda = 1,
+                                                      .B = grad_output_promoted->DataPtr(),
+                                                      .ldb = static_cast<int>(N),
+                                                      .C = grad_other->DataPtr(),
+                                                      .ldc = 1,
+                                                      .alpha = 1.0f,
+                                                      .beta = 0.0f,
+                                                      .batch_count = 1,
+                                                      .input_dtype = promoted_type,
+                                                      .output_dtype = output_dtype,
+                                                  });
             }),
             DataType::kBFLOAT16)
     default:

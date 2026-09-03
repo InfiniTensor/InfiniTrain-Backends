@@ -10,6 +10,7 @@ void RegisterElementwiseKernels();
 void RegisterEmbeddingKernels();
 void RegisterFillKernels();
 void RegisterGatherKernels();
+void RegisterGemmKernels();
 void RegisterLayerNormKernels();
 void RegisterLinearKernels();
 void RegisterNoOpKernels();
@@ -33,6 +34,7 @@ void RegisterMacaKernels() {
     RegisterEmbeddingKernels();
     RegisterFillKernels();
     RegisterGatherKernels();
+    RegisterGemmKernels();
     RegisterLayerNormKernels();
     RegisterLinearKernels();
     RegisterNoOpKernels();
