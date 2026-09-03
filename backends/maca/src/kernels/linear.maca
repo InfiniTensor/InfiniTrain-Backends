@@ -5,7 +5,6 @@
 #include <vector>
 
 #include <cub/block/block_reduce.cuh>
-#include <mcblas/mcblas.h>
 
 #include "infini_train/include/autograd/linear.h"
 #include "infini_train/include/core/runtime/device_guard.h"
@@ -14,6 +13,7 @@
 
 #include "common/common_maca.h"
 #include "common/kernel_helper.cuh"
+#include "kernels/common/gemm.h"
 #include "runtime/maca_dispatch.h"
 #include "runtime/maca_runtime_common.h"
 
@@ -47,39 +47,34 @@ std::shared_ptr<Tensor> MatmulForward(const std::shared_ptr<Tensor> &input, cons
     auto output = std::make_shared<Tensor>(output_dims, dtype, input->GetDevice());
 
     auto device = input->GetDevice();
-    const float alpha = 1.0f, beta = 0.0f;
-    mcblasHandle_t handle = dynamic_cast<infini_train::core::maca::MacaBlasHandle *>(
-                                infini_train::core::GetDeviceGuardImpl(device.type())->GetBlasHandle(device))
-                                ->mcblas_handle();
-
-    // cuBLAS is colmun-major
+    // mcBLAS is column-major.
     // output = input * other --> output.T = other.T * input.T
     // C = A * B ==> output.T[*, n, m] = other.T[*, n, k] * input.T[*, k, m]
     // C = output.T[*, n, m]
     // A = other.T[*, n, k]
     // B = input.T[*, k, m]
-    int lda = n;
-    int ldb = k;
-    int ldc = n;
-    int64_t stride_a = bs > 1 ? n * k : 0;
-    int64_t stride_b = bs > 1 ? k * m : 0;
-    int64_t stride_c = bs > 1 ? m * n : 0;
-    // NOTE(zbl): the last mcblasGemmAlgo_t param has no effect on GPU arch >= sm_80(Ampere)
-
-    switch (dtype) {
-        DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
-                          handle, MCBLAS_OP_N, MCBLAS_OP_N, n, m, k, &alpha, other->DataPtr(), MACA_R_32F, lda,
-                          stride_a, input->DataPtr(), MACA_R_32F, ldb, stride_b, &beta, output->DataPtr(), MACA_R_32F,
-                          ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
-                          handle, MCBLAS_OP_N, MCBLAS_OP_N, n, m, k, &alpha, other->DataPtr(), MACA_R_16BF, lda,
-                          stride_a, input->DataPtr(), MACA_R_16BF, ldb, stride_b, &beta, output->DataPtr(), MACA_R_16BF,
-                          ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(dtype, "MACA MatmulForward");
-    }
+    Dispatcher::Instance().Call<void>({device.type(), "Gemm"}, device,
+                                      GemmParams{
+                                          .trans_a = GemmTranspose::kNoTranspose,
+                                          .trans_b = GemmTranspose::kNoTranspose,
+                                          .m = static_cast<int>(n),
+                                          .n = static_cast<int>(m),
+                                          .k = static_cast<int>(k),
+                                          .A = other->DataPtr(),
+                                          .lda = static_cast<int>(n),
+                                          .B = input->DataPtr(),
+                                          .ldb = static_cast<int>(k),
+                                          .C = output->DataPtr(),
+                                          .ldc = static_cast<int>(n),
+                                          .alpha = 1.0f,
+                                          .beta = 0.0f,
+                                          .batch_count = static_cast<int>(bs),
+                                          .stride_a = bs > 1 ? n * k : 0,
+                                          .stride_b = bs > 1 ? k * m : 0,
+                                          .stride_c = bs > 1 ? m * n : 0,
+                                          .input_dtype = dtype,
+                                          .output_dtype = dtype,
+                                      });
 
     return output;
 }
@@ -118,29 +113,28 @@ std::shared_ptr<Tensor> MatmulBackwardInput(const std::shared_ptr<Tensor> &other
     auto grad_input = std::make_shared<Tensor>(input_dims, output_dtype, grad_output->GetDevice());
 
     auto device = grad_output->GetDevice();
-    const float alpha = 1.0f, beta = 0.0f;
-    mcblasHandle_t handle = dynamic_cast<infini_train::core::maca::MacaBlasHandle *>(
-                                infini_train::core::GetDeviceGuardImpl(device.type())->GetBlasHandle(device))
-                                ->mcblas_handle();
-
-    const int lda = n, ldb = n, ldc = k;
-    const int64_t stride_a = bs > 1 ? k * n : 0;
-    const int64_t stride_b = bs > 1 ? n * m : 0;
-    const int64_t stride_c = bs > 1 ? m * k : 0;
-    switch (compute_dtype) {
-        DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
-                          handle, MCBLAS_OP_T, MCBLAS_OP_N, k, m, n, &alpha, other->DataPtr(), MACA_R_32F, lda,
-                          stride_a, grad_output_promoted->DataPtr(), MACA_R_32F, ldb, stride_b, &beta,
-                          grad_input->DataPtr(), MACA_R_32F, ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
-                          handle, MCBLAS_OP_T, MCBLAS_OP_N, k, m, n, &alpha, other->DataPtr(), MACA_R_16BF, lda,
-                          stride_a, grad_output_promoted->DataPtr(), MACA_R_16BF, ldb, stride_b, &beta,
-                          grad_input->DataPtr(), MACA_R_32F, ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA MatmulBackwardInput");
-    }
+    Dispatcher::Instance().Call<void>({device.type(), "Gemm"}, device,
+                                      GemmParams{
+                                          .trans_a = GemmTranspose::kTranspose,
+                                          .trans_b = GemmTranspose::kNoTranspose,
+                                          .m = static_cast<int>(k),
+                                          .n = static_cast<int>(m),
+                                          .k = static_cast<int>(n),
+                                          .A = other->DataPtr(),
+                                          .lda = static_cast<int>(n),
+                                          .B = grad_output_promoted->DataPtr(),
+                                          .ldb = static_cast<int>(n),
+                                          .C = grad_input->DataPtr(),
+                                          .ldc = static_cast<int>(k),
+                                          .alpha = 1.0f,
+                                          .beta = 0.0f,
+                                          .batch_count = static_cast<int>(bs),
+                                          .stride_a = bs > 1 ? k * n : 0,
+                                          .stride_b = bs > 1 ? n * m : 0,
+                                          .stride_c = bs > 1 ? m * k : 0,
+                                          .input_dtype = compute_dtype,
+                                          .output_dtype = output_dtype,
+                                      });
 
     return grad_input;
 }
@@ -181,29 +175,28 @@ std::shared_ptr<Tensor> MatmulBackwardOther(const std::shared_ptr<Tensor> &input
     auto grad_other = std::make_shared<Tensor>(other_dims, output_dtype, grad_output->GetDevice());
 
     auto device = grad_output->GetDevice();
-    const float alpha = 1.0f, beta = 0.0f;
-    mcblasHandle_t handle = dynamic_cast<infini_train::core::maca::MacaBlasHandle *>(
-                                infini_train::core::GetDeviceGuardImpl(device.type())->GetBlasHandle(device))
-                                ->mcblas_handle();
-
-    const int lda = n, ldb = k, ldc = n;
-    const int64_t stride_a = bs > 1 ? n * m : 0;
-    const int64_t stride_b = bs > 1 ? k * m : 0;
-    const int64_t stride_c = bs > 1 ? n * k : 0;
-    switch (compute_dtype) {
-        DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
-                          handle, MCBLAS_OP_N, MCBLAS_OP_T, n, k, m, &alpha, grad_output_promoted->DataPtr(),
-                          MACA_R_32F, lda, stride_a, input->DataPtr(), MACA_R_32F, ldb, stride_b, &beta,
-                          grad_other->DataPtr(), MACA_R_32F, ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP(MCBLAS_CHECK(mcblasGemmStridedBatchedEx(
-                          handle, MCBLAS_OP_N, MCBLAS_OP_T, n, k, m, &alpha, grad_output_promoted->DataPtr(),
-                          MACA_R_16BF, lda, stride_a, input->DataPtr(), MACA_R_16BF, ldb, stride_b, &beta,
-                          grad_other->DataPtr(), MACA_R_32F, ldc, stride_c, bs, MACA_R_32F, MCBLAS_GEMM_DEFAULT));),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA MatmulBackwardOther");
-    }
+    Dispatcher::Instance().Call<void>({device.type(), "Gemm"}, device,
+                                      GemmParams{
+                                          .trans_a = GemmTranspose::kNoTranspose,
+                                          .trans_b = GemmTranspose::kTranspose,
+                                          .m = static_cast<int>(n),
+                                          .n = static_cast<int>(k),
+                                          .k = static_cast<int>(m),
+                                          .A = grad_output_promoted->DataPtr(),
+                                          .lda = static_cast<int>(n),
+                                          .B = input->DataPtr(),
+                                          .ldb = static_cast<int>(k),
+                                          .C = grad_other->DataPtr(),
+                                          .ldc = static_cast<int>(n),
+                                          .alpha = 1.0f,
+                                          .beta = 0.0f,
+                                          .batch_count = static_cast<int>(bs),
+                                          .stride_a = bs > 1 ? n * m : 0,
+                                          .stride_b = bs > 1 ? k * m : 0,
+                                          .stride_c = bs > 1 ? n * k : 0,
+                                          .input_dtype = compute_dtype,
+                                          .output_dtype = output_dtype,
+                                      });
 
     return grad_other;
 }
@@ -238,7 +231,7 @@ std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, cons
     CHECK_EQ(weight_dims.size(), 2);
     CHECK_EQ(in_features, weight_dims[transpose ? 1 : 0]);
 
-    // As for cublas:
+    // mcBLAS computes the equivalent column-major product:
     // C = alpha * op(B) * op(A) + beta * C
     // Dimensions:
     //   input:  (bs, in_features)
@@ -272,16 +265,6 @@ std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, cons
             "MACA LinearForward");
     }
 
-    const float alpha = 1.0f;
-    auto trans_a = transpose ? MCBLAS_OP_T : MCBLAS_OP_N;
-    auto trans_b = MCBLAS_OP_N;
-    auto lda = transpose ? in_features : out_features;
-    mcblasHandle_t handle = dynamic_cast<infini_train::core::maca::MacaBlasHandle *>(
-                                infini_train::core::GetDeviceGuardImpl(device.type())->GetBlasHandle(device))
-                                ->mcblas_handle();
-
-    // TODO(zbl): use mcblasSgemv if possible for convenience and simplicity
-    //
     // - if a is transposed:
     // weight is [out_features, in_features] here
     // output = input * weight.T --> output.T = weight * input.T
@@ -294,24 +277,26 @@ std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, cons
     // C = output.T[out_features, bs]
     // A = weight.T[out_features, in_features]
     // B = input.T[in_features, bs]
-    switch (input->Dtype()) {
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasSgemm(handle, trans_a, trans_b, out_features, bs, in_features, &alpha,
-                                                   static_cast<const float *>(weight->DataPtr()), lda,
-                                                   static_cast<const float *>(input->DataPtr()), in_features, &beta,
-                                                   static_cast<float *>(output->DataPtr()), out_features));
-                      }),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasGemmEx(handle, trans_a, trans_b, out_features, bs, in_features, &alpha,
-                                                    weight->DataPtr(), MACA_R_16BF, lda, input->DataPtr(), MACA_R_16BF,
-                                                    in_features, &beta, output->DataPtr(), MACA_R_16BF, out_features,
-                                                    MACA_R_32F, MCBLAS_GEMM_DEFAULT));
-                      }),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(dtype, "MACA LinearForward");
-    }
+    Dispatcher::Instance().Call<void>(
+        {device.type(), "Gemm"}, device,
+        GemmParams{
+            .trans_a = transpose ? GemmTranspose::kTranspose : GemmTranspose::kNoTranspose,
+            .trans_b = GemmTranspose::kNoTranspose,
+            .m = static_cast<int>(out_features),
+            .n = static_cast<int>(bs),
+            .k = static_cast<int>(in_features),
+            .A = weight->DataPtr(),
+            .lda = static_cast<int>(transpose ? in_features : out_features),
+            .B = input->DataPtr(),
+            .ldb = static_cast<int>(in_features),
+            .C = output->DataPtr(),
+            .ldc = static_cast<int>(out_features),
+            .alpha = 1.0f,
+            .beta = beta,
+            .batch_count = 1,
+            .input_dtype = dtype,
+            .output_dtype = dtype,
+        });
 
     return output;
 }
@@ -354,35 +339,28 @@ std::shared_ptr<Tensor> LinearBackwardInput(const std::shared_ptr<Tensor> &weigh
     auto output_dtype = (compute_dtype == DataType::kBFLOAT16) ? DataType::kFLOAT32 : compute_dtype;
     auto grad_input = std::make_shared<Tensor>(input_dims, output_dtype, grad_output->GetDevice());
 
-    auto device = grad_output->GetDevice();
-    const float alpha = 1.0f;
-    const float beta = 0.0f;
-    mcblasHandle_t handle = dynamic_cast<infini_train::core::maca::MacaBlasHandle *>(
-                                infini_train::core::GetDeviceGuardImpl(device.type())->GetBlasHandle(device))
-                                ->mcblas_handle();
-
     // d_input = d_output * weight (transposed weight layout) or d_output * weight.T.
-    auto trans_a = transpose ? MCBLAS_OP_N : MCBLAS_OP_T;
-    auto lda = transpose ? in_features : out_features;
-    switch (compute_dtype) {
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasSgemm(handle, trans_a, MCBLAS_OP_N, in_features, bs, out_features, &alpha,
-                                                   static_cast<const float *>(weight->DataPtr()), lda,
-                                                   static_cast<const float *>(grad_output_promoted->DataPtr()),
-                                                   out_features, &beta, static_cast<float *>(grad_input->DataPtr()),
-                                                   in_features));
-                      }),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasGemmEx(
-                              handle, trans_a, MCBLAS_OP_N, in_features, bs, out_features, &alpha, weight->DataPtr(),
-                              MACA_R_16BF, lda, grad_output_promoted->DataPtr(), MACA_R_16BF, out_features, &beta,
-                              grad_input->DataPtr(), MACA_R_32F, in_features, MACA_R_32F, MCBLAS_GEMM_DEFAULT));
-                      }),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA LinearBackwardInput");
-    }
+    auto device = grad_output->GetDevice();
+    Dispatcher::Instance().Call<void>(
+        {device.type(), "Gemm"}, device,
+        GemmParams{
+            .trans_a = transpose ? GemmTranspose::kNoTranspose : GemmTranspose::kTranspose,
+            .trans_b = GemmTranspose::kNoTranspose,
+            .m = static_cast<int>(in_features),
+            .n = static_cast<int>(bs),
+            .k = static_cast<int>(out_features),
+            .A = weight->DataPtr(),
+            .lda = static_cast<int>(transpose ? in_features : out_features),
+            .B = grad_output_promoted->DataPtr(),
+            .ldb = static_cast<int>(out_features),
+            .C = grad_input->DataPtr(),
+            .ldc = static_cast<int>(in_features),
+            .alpha = 1.0f,
+            .beta = 0.0f,
+            .batch_count = 1,
+            .input_dtype = compute_dtype,
+            .output_dtype = output_dtype,
+        });
 
     return grad_input;
 }
@@ -407,12 +385,6 @@ std::shared_ptr<Tensor> LinearBackwardWeight(const std::shared_ptr<Tensor> &inpu
     auto grad_weight = std::make_shared<Tensor>(weight_dims, output_dtype, grad_output->GetDevice());
 
     auto device = grad_output->GetDevice();
-    const float alpha = 1.0f;
-    const float beta = 0.0f;
-    mcblasHandle_t handle = dynamic_cast<infini_train::core::maca::MacaBlasHandle *>(
-                                infini_train::core::GetDeviceGuardImpl(device.type())->GetBlasHandle(device))
-                                ->mcblas_handle();
-
     const int m = transpose ? in_features : out_features;
     const int n = transpose ? out_features : in_features;
     const void *a = transpose ? input->DataPtr() : grad_output_promoted->DataPtr();
@@ -421,22 +393,25 @@ std::shared_ptr<Tensor> LinearBackwardWeight(const std::shared_ptr<Tensor> &inpu
     const int ldb = transpose ? out_features : in_features;
     const int ldc = transpose ? in_features : out_features;
 
-    switch (compute_dtype) {
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasSgemm(handle, MCBLAS_OP_N, MCBLAS_OP_T, m, n, bs, &alpha,
-                                                   static_cast<const float *>(a), lda, static_cast<const float *>(b),
-                                                   ldb, &beta, static_cast<float *>(grad_weight->DataPtr()), ldc));
-                      }),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP({
-                          MCBLAS_CHECK(mcblasGemmEx(handle, MCBLAS_OP_N, MCBLAS_OP_T, m, n, bs, &alpha, a, MACA_R_16BF,
-                                                    lda, b, MACA_R_16BF, ldb, &beta, grad_weight->DataPtr(), MACA_R_32F,
-                                                    ldc, MACA_R_32F, MCBLAS_GEMM_DEFAULT));
-                      }),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA LinearBackwardWeight");
-    }
+    Dispatcher::Instance().Call<void>({device.type(), "Gemm"}, device,
+                                      GemmParams{
+                                          .trans_a = GemmTranspose::kNoTranspose,
+                                          .trans_b = GemmTranspose::kTranspose,
+                                          .m = m,
+                                          .n = n,
+                                          .k = static_cast<int>(bs),
+                                          .A = a,
+                                          .lda = lda,
+                                          .B = b,
+                                          .ldb = ldb,
+                                          .C = grad_weight->DataPtr(),
+                                          .ldc = ldc,
+                                          .alpha = 1.0f,
+                                          .beta = 0.0f,
+                                          .batch_count = 1,
+                                          .input_dtype = compute_dtype,
+                                          .output_dtype = output_dtype,
+                                      });
 
     return grad_weight;
 }

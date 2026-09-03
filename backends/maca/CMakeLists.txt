@@ -15,6 +15,7 @@ set(MACA_BACKEND_SOURCES
   src/backend.cc
   src/runtime/maca_guard_impl.cc
   src/runtime/maca_runtime_common.cc
+  src/kernels/common/gemm.cc
   src/kernels/register_maca_kernels.cc
   ${MACA_DEVICE_SOURCES}
 )
