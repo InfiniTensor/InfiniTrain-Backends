@@ -151,11 +151,7 @@ std::shared_ptr<Tensor> TopKBackward(const std::shared_ptr<Tensor> &grad_values,
     return grad_input;
 }
 
-void RegisterTopKKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TopKForward,
-                    infini_train::kernels::maca::TopKForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TopKBackward,
-                    infini_train::kernels::maca::TopKBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TopKForward, infini_train::kernels::maca::TopKForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TopKBackward, infini_train::kernels::maca::TopKBackward)
 
 } // namespace infini_train::kernels::maca

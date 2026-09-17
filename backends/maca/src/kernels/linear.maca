@@ -210,51 +210,6 @@ template <typename T> __global__ void BiasCopyKernel(T *output, const T *bias, i
     output[idx] = bias[j];
 }
 
-// Accumulate FP32 products in FP64 with a fixed order, then round once when writing the result.
-constexpr int kLinearBackwardInputTileSize = 16;
-
-__global__ void LinearBackwardInputFp32Kernel(const float *__restrict__ weight, const float *__restrict__ grad_output,
-                                              float *__restrict__ grad_input, int64_t bs, int64_t in_features,
-                                              int64_t out_features, bool transpose) {
-    __shared__ float grad_tile[kLinearBackwardInputTileSize][kLinearBackwardInputTileSize];
-    __shared__ float weight_tile[kLinearBackwardInputTileSize][kLinearBackwardInputTileSize];
-
-    const int64_t row
-        = static_cast<int64_t>(blockIdx.y) * kLinearBackwardInputTileSize + static_cast<int64_t>(threadIdx.y);
-    const int64_t in_col
-        = static_cast<int64_t>(blockIdx.x) * kLinearBackwardInputTileSize + static_cast<int64_t>(threadIdx.x);
-    double sum = 0.0;
-
-    for (int64_t out_base = 0; out_base < out_features; out_base += kLinearBackwardInputTileSize) {
-        const int64_t grad_col = out_base + static_cast<int64_t>(threadIdx.x);
-        grad_tile[threadIdx.y][threadIdx.x]
-            = row < bs && grad_col < out_features ? grad_output[row * out_features + grad_col] : 0.0f;
-
-        const int64_t weight_row = out_base + static_cast<int64_t>(threadIdx.y);
-        if (weight_row < out_features && in_col < in_features) {
-            const int64_t weight_index
-                = transpose ? weight_row * in_features + in_col : in_col * out_features + weight_row;
-            weight_tile[threadIdx.y][threadIdx.x] = weight[weight_index];
-        } else {
-            weight_tile[threadIdx.y][threadIdx.x] = 0.0f;
-        }
-        __syncthreads();
-
-        const int64_t remaining = out_features - out_base;
-        const int tile_width
-            = remaining < kLinearBackwardInputTileSize ? static_cast<int>(remaining) : kLinearBackwardInputTileSize;
-#pragma unroll 1
-        for (int k = 0; k < tile_width; ++k) {
-            sum += static_cast<double>(grad_tile[threadIdx.y][k] * weight_tile[k][threadIdx.x]);
-        }
-        __syncthreads();
-    }
-
-    if (row < bs && in_col < in_features) {
-        grad_input[row * in_features + in_col] = static_cast<float>(sum);
-    }
-}
-
 std::shared_ptr<Tensor> LinearForward(const std::shared_ptr<Tensor> &input, const std::shared_ptr<Tensor> &weight,
                                       bool transpose, const std::shared_ptr<Tensor> &bias) {
 
@@ -385,49 +340,28 @@ std::shared_ptr<Tensor> LinearBackwardInput(const std::shared_ptr<Tensor> &weigh
     auto grad_input = std::make_shared<Tensor>(input_dims, output_dtype, grad_output->GetDevice());
 
     auto device = grad_output->GetDevice();
-    const auto &maca_stream = dynamic_cast<infini_train::core::maca::MacaStream *>(
-                                  infini_train::core::GetDeviceGuardImpl(device.type())->GetStream(device))
-                                  ->maca_stream();
 
     // d_input = d_output * weight (transposed weight layout) or d_output * weight.T.
-    switch (compute_dtype) {
-        DISPATCH_CASE(WRAP({
-                          const dim3 block_dims(kLinearBackwardInputTileSize, kLinearBackwardInputTileSize);
-                          const dim3 grid_dims(CEIL_DIV(in_features, kLinearBackwardInputTileSize),
-                                               CEIL_DIV(bs, kLinearBackwardInputTileSize));
-                          LinearBackwardInputFp32Kernel<<<grid_dims, block_dims, 0, maca_stream>>>(
-                              static_cast<const float *>(weight->DataPtr()),
-                              static_cast<const float *>(grad_output_promoted->DataPtr()),
-                              static_cast<float *>(grad_input->DataPtr()), bs, in_features, out_features, transpose);
-                          MACA_CHECK(mcGetLastError());
-                      }),
-                      DataType::kFLOAT32)
-        DISPATCH_CASE(WRAP({
-                          Dispatcher::Instance().Call<void>(
-                              {device.type(), "Gemm"}, device,
-                              GemmParams{
-                                  .trans_a = transpose ? GemmTranspose::kNoTranspose : GemmTranspose::kTranspose,
-                                  .trans_b = GemmTranspose::kNoTranspose,
-                                  .m = static_cast<int>(in_features),
-                                  .n = static_cast<int>(bs),
-                                  .k = static_cast<int>(out_features),
-                                  .A = weight->DataPtr(),
-                                  .lda = static_cast<int>(transpose ? in_features : out_features),
-                                  .B = grad_output_promoted->DataPtr(),
-                                  .ldb = static_cast<int>(out_features),
-                                  .C = grad_input->DataPtr(),
-                                  .ldc = static_cast<int>(in_features),
-                                  .alpha = 1.0f,
-                                  .beta = 0.0f,
-                                  .batch_count = 1,
-                                  .input_dtype = compute_dtype,
-                                  .output_dtype = output_dtype,
-                              });
-                      }),
-                      DataType::kBFLOAT16)
-    default:
-        LOG_UNSUPPORTED_DTYPE(compute_dtype, "MACA LinearBackwardInput");
-    }
+    Dispatcher::Instance().Call<void>(
+        {device.type(), "Gemm"}, device,
+        GemmParams{
+            .trans_a = transpose ? GemmTranspose::kNoTranspose : GemmTranspose::kTranspose,
+            .trans_b = GemmTranspose::kNoTranspose,
+            .m = static_cast<int>(in_features),
+            .n = static_cast<int>(bs),
+            .k = static_cast<int>(out_features),
+            .A = weight->DataPtr(),
+            .lda = static_cast<int>(transpose ? in_features : out_features),
+            .B = grad_output_promoted->DataPtr(),
+            .ldb = static_cast<int>(out_features),
+            .C = grad_input->DataPtr(),
+            .ldc = static_cast<int>(in_features),
+            .alpha = 1.0f,
+            .beta = 0.0f,
+            .batch_count = 1,
+            .input_dtype = compute_dtype,
+            .output_dtype = output_dtype,
+        });
 
     return grad_input;
 }
@@ -524,21 +458,19 @@ std::shared_ptr<Tensor> LinearBackwardBias(const std::shared_ptr<Tensor> &grad_o
 
 namespace infini_train::kernels::maca {
 
-void RegisterLinearKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MatmulForward,
-                    infini_train::kernels::maca::MatmulForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MatmulBackwardInput,
-                    infini_train::kernels::maca::MatmulBackwardInput)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MatmulBackwardOther,
-                    infini_train::kernels::maca::MatmulBackwardOther)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearForward,
-                    infini_train::kernels::maca::LinearForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearBackwardInput,
-                    infini_train::kernels::maca::LinearBackwardInput)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearBackwardWeight,
-                    infini_train::kernels::maca::LinearBackwardWeight)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearBackwardBias,
-                    infini_train::kernels::maca::LinearBackwardBias)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MatmulForward,
+                infini_train::kernels::maca::MatmulForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MatmulBackwardInput,
+                infini_train::kernels::maca::MatmulBackwardInput)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MatmulBackwardOther,
+                infini_train::kernels::maca::MatmulBackwardOther)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearForward,
+                infini_train::kernels::maca::LinearForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearBackwardInput,
+                infini_train::kernels::maca::LinearBackwardInput)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearBackwardWeight,
+                infini_train::kernels::maca::LinearBackwardWeight)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LinearBackwardBias,
+                infini_train::kernels::maca::LinearBackwardBias)
 
 } // namespace infini_train::kernels::maca

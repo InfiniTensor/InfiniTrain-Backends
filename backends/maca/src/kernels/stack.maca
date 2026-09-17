@@ -155,11 +155,8 @@ std::vector<std::shared_ptr<Tensor>> StackBackward(const std::vector<int64_t> &i
 
 namespace infini_train::kernels::maca {
 
-void RegisterStackKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, StackForward,
-                    infini_train::kernels::maca::StackForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, StackBackward,
-                    infini_train::kernels::maca::StackBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, StackForward, infini_train::kernels::maca::StackForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, StackBackward,
+                infini_train::kernels::maca::StackBackward)
 
 } // namespace infini_train::kernels::maca

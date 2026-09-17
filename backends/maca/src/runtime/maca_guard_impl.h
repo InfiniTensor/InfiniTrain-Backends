@@ -14,8 +14,6 @@ class BlasHandle;
 
 namespace infini_train::core::maca {
 
-void RegisterMacaRuntime();
-
 class MacaGuardImpl final : public DeviceGuardImpl {
 public:
     static void InitSingleStream(Device device);

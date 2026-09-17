@@ -185,11 +185,8 @@ std::tuple<std::shared_ptr<Tensor>, std::shared_ptr<Tensor>> OuterBackward(const
 
 namespace infini_train::kernels::maca {
 
-void RegisterOuterKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, OuterForward,
-                    infini_train::kernels::maca::OuterForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, OuterBackward,
-                    infini_train::kernels::maca::OuterBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, OuterForward, infini_train::kernels::maca::OuterForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, OuterBackward,
+                infini_train::kernels::maca::OuterBackward)
 
 } // namespace infini_train::kernels::maca

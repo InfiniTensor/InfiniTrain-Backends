@@ -196,6 +196,6 @@ void McclImpl::Recv(void *buff, size_t count, DataType dtype, int peer, const Cc
     MCCL_CHECK(mcclRecv(buff, count, kMcclDtypeMap.at(dtype), peer, GetMcclComm(comm), GetMacaStream(stream)));
 }
 
-void RegisterMcclBackend() { INFINI_TRAIN_REGISTER_CCL_IMPL(Device::DeviceType::kPrivateUse1, McclImpl) }
+INFINI_TRAIN_REGISTER_CCL_IMPL(Device::DeviceType::kPrivateUse1, McclImpl)
 
 } // namespace infini_train::core::maca

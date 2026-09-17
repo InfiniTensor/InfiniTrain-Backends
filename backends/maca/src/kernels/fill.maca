@@ -52,8 +52,6 @@ void Fill(std::shared_ptr<Tensor> tensor, Scalar scalar) {
 
 namespace infini_train::kernels::maca {
 
-void RegisterFillKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, Fill, infini_train::kernels::maca::Fill);
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, Fill, infini_train::kernels::maca::Fill);
 
 } // namespace infini_train::kernels::maca

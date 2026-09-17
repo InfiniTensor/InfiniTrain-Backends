@@ -29,11 +29,7 @@ std::shared_ptr<Tensor> NoOpBackward(const std::vector<int64_t> &dims, const std
 
 namespace infini_train::kernels::maca {
 
-void RegisterNoOpKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NoOpForward,
-                    infini_train::kernels::maca::NoOpForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NoOpBackward,
-                    infini_train::kernels::maca::NoOpBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NoOpForward, infini_train::kernels::maca::NoOpForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NoOpBackward, infini_train::kernels::maca::NoOpBackward)
 
 } // namespace infini_train::kernels::maca

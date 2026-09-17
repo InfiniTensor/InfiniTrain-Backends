@@ -53,8 +53,6 @@ std::shared_ptr<Tensor> Cast(std::shared_ptr<Tensor> input, DataType dtype) {
 
 namespace infini_train::kernels::maca {
 
-void RegisterCastKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, Cast, infini_train::kernels::maca::Cast);
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, Cast, infini_train::kernels::maca::Cast);
 
 } // namespace infini_train::kernels::maca

@@ -414,6 +414,6 @@ std::pair<size_t, size_t> MacaGuardImpl::GetMemPoolPeakMB(Device device) const {
     return std::make_pair<size_t, size_t>(0, 0);
 }
 
-void RegisterMacaRuntime() { INFINI_TRAIN_REGISTER_DEVICE_GUARD_IMPL(Device::DeviceType::kPrivateUse1, MacaGuardImpl) }
+INFINI_TRAIN_REGISTER_DEVICE_GUARD_IMPL(Device::DeviceType::kPrivateUse1, MacaGuardImpl)
 
 } // namespace infini_train::core::maca

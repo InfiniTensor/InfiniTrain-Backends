@@ -90,11 +90,9 @@ void AdamAccumulateGrad(const std::shared_ptr<Tensor> &grad, const std::shared_p
 
 namespace infini_train::kernels::maca {
 
-void RegisterAccumulateGradKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AccumulateGrad,
-                    infini_train::kernels::maca::AccumulateGrad)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AdamAccumulateGrad,
-                    infini_train::kernels::maca::AdamAccumulateGrad)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AccumulateGrad,
+                infini_train::kernels::maca::AccumulateGrad)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AdamAccumulateGrad,
+                infini_train::kernels::maca::AdamAccumulateGrad)
 
 } // namespace infini_train::kernels::maca

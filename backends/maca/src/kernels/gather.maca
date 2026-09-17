@@ -227,11 +227,9 @@ std::shared_ptr<Tensor> GatherBackward(const std::shared_ptr<Tensor> &grad_outpu
 
 namespace infini_train::kernels::maca {
 
-void RegisterGatherKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GatherForward,
-                    infini_train::kernels::maca::GatherForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GatherBackward,
-                    infini_train::kernels::maca::GatherBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GatherForward,
+                infini_train::kernels::maca::GatherForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GatherBackward,
+                infini_train::kernels::maca::GatherBackward)
 
 } // namespace infini_train::kernels::maca

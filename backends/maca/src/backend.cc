@@ -4,11 +4,7 @@
 
 #include "infini_train/include/core/privateuse1_backend.h"
 
-#include "kernels/register_maca_kernels.h"
 #include "runtime/maca_guard_impl.h"
-#ifdef USE_MCCL
-#include "ccl/mccl_impl.h"
-#endif
 
 namespace infini_train::maca {
 
@@ -18,11 +14,6 @@ void RegisterBackend() {
         core::PrivateUse1BackendRegistration registration;
         registration.name = "maca";
         registration.default_autocast_dtype = DataType::kBFLOAT16;
-        registration.register_runtime = &core::maca::RegisterMacaRuntime;
-        registration.register_kernels = &kernels::maca::RegisterMacaKernels;
-#ifdef USE_MCCL
-        registration.register_ccl = &core::maca::RegisterMcclBackend;
-#endif
         core::RegisterPrivateUse1Backend(registration);
     });
 }

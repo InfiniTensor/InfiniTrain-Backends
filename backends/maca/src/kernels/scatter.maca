@@ -116,11 +116,9 @@ std::shared_ptr<Tensor> ScatterBackward(const std::shared_ptr<Tensor> &grad_outp
     return grad_values;
 }
 
-void RegisterScatterKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ScatterForward,
-                    infini_train::kernels::maca::ScatterForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ScatterBackward,
-                    infini_train::kernels::maca::ScatterBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ScatterForward,
+                infini_train::kernels::maca::ScatterForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ScatterBackward,
+                infini_train::kernels::maca::ScatterBackward)
 
 } // namespace infini_train::kernels::maca
