@@ -1,7 +1,12 @@
 #include "ccl/mccl_impl.h"
 
+#include <algorithm>
+#include <charconv>
 #include <cstddef>
+#include <cstdlib>
+#include <limits>
 #include <mccl.h>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -118,8 +123,42 @@ void McclImpl::CommDestroy(CclComm *comm) const {
 
 void McclImpl::AllReduce(const void *sendbuff, void *recvbuff, size_t count, DataType dtype,
                          nn::parallel::function::ReduceOpType reduce_op, const CclComm *comm, Stream *stream) const {
-    MCCL_CHECK(mcclAllReduce(sendbuff, recvbuff, count, kMcclDtypeMap.at(dtype), kMcclReduceOpMap.at(reduce_op),
-                             GetMcclComm(comm), GetMacaStream(stream)));
+    // C550 all-reduce bandwidth drops sharply for very large messages. Segment
+    // at the provider boundary so every framework caller stays below the cliff.
+    constexpr size_t kBytesPerMB = 1024ULL * 1024ULL;
+    constexpr size_t kDefaultSegmentBytes = 160 * kBytesPerMB;
+    static const size_t segment_bytes = [] {
+        const char *value = std::getenv("INFINI_MCCL_ALLREDUCE_SEGMENT_MB");
+        if (value == nullptr || *value == '\0') {
+            return kDefaultSegmentBytes;
+        }
+        const std::string_view text(value);
+        size_t size_mb = 0;
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), size_mb);
+        CHECK(error == std::errc{} && end == text.data() + text.size() && size_mb <= 4096)
+            << "INFINI_MCCL_ALLREDUCE_SEGMENT_MB must be an integer in [0, 4096]";
+        return size_mb == 0 ? std::numeric_limits<size_t>::max() : size_mb * kBytesPerMB;
+    }();
+
+    const size_t element_size = infini_train::kDataTypeToSize.at(dtype);
+    const size_t segment_elements = std::max<size_t>(1, segment_bytes / element_size);
+    const auto mccl_dtype = kMcclDtypeMap.at(dtype);
+    const auto mccl_op = kMcclReduceOpMap.at(reduce_op);
+    auto mccl_comm = GetMcclComm(comm);
+    auto mccl_stream = GetMacaStream(stream);
+    if (count <= segment_elements) {
+        MCCL_CHECK(mcclAllReduce(sendbuff, recvbuff, count, mccl_dtype, mccl_op, mccl_comm, mccl_stream));
+        return;
+    }
+
+    const auto *bytes = static_cast<const std::byte *>(sendbuff);
+    auto *output = static_cast<std::byte *>(recvbuff);
+    for (size_t offset = 0; offset < count;) {
+        const size_t elements = std::min(segment_elements, count - offset);
+        MCCL_CHECK(mcclAllReduce(bytes + offset * element_size, output + offset * element_size, elements, mccl_dtype,
+                                 mccl_op, mccl_comm, mccl_stream));
+        offset += elements;
+    }
 }
 
 void McclImpl::Broadcast(const void *sendbuff, void *recvbuff, size_t count, DataType dtype, int root,

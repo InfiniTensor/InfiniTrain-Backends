@@ -5,6 +5,7 @@ function(add_maca_example target_name output_name)
   target_compile_definitions(${target_name} PRIVATE
     INFINITRAIN_EXAMPLE_EXTERNAL_BACKEND_HEADER=\"infini_train_maca/backend.h\"
     INFINITRAIN_EXAMPLE_EXTERNAL_BACKEND_REGISTRAR=infini_train::maca::RegisterBackend
+    INFINITRAIN_EXAMPLE_EXTERNAL_BACKEND_WORKAROUNDS=FLAGS_maca_multithread_workarounds
   )
   target_link_libraries(${target_name} PRIVATE
     InfiniTrain::Backend::MACAExecutable)
