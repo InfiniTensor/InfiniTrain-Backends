@@ -238,11 +238,9 @@ LayerNormBackward(const std::shared_ptr<Tensor> &input, const std::shared_ptr<Te
 
 namespace infini_train::kernels::maca {
 
-void RegisterLayerNormKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LayerNormForward,
-                    infini_train::kernels::maca::LayerNormForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LayerNormBackward,
-                    infini_train::kernels::maca::LayerNormBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LayerNormForward,
+                infini_train::kernels::maca::LayerNormForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LayerNormBackward,
+                infini_train::kernels::maca::LayerNormBackward)
 
 } // namespace infini_train::kernels::maca

@@ -1233,79 +1233,64 @@ std::shared_ptr<Tensor> SigmoidBackward(const std::shared_ptr<Tensor> &output,
 
 namespace infini_train::kernels::maca {
 
-void RegisterElementwiseKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NegForward, infini_train::kernels::maca::NegForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NegBackward,
-                    infini_train::kernels::maca::NegBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ReciprocalForward,
-                    infini_train::kernels::maca::ReciprocalForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ReciprocalBackward,
-                    infini_train::kernels::maca::ReciprocalBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SinForward, infini_train::kernels::maca::SinForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SinBackward,
-                    infini_train::kernels::maca::SinBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CosForward, infini_train::kernels::maca::CosForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CosBackward,
-                    infini_train::kernels::maca::CosBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TanhForward,
-                    infini_train::kernels::maca::TanhForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TanhBackward,
-                    infini_train::kernels::maca::TanhBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, PowForward, infini_train::kernels::maca::PowForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, PowBackward,
-                    infini_train::kernels::maca::PowBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RsqrtForward,
-                    infini_train::kernels::maca::RsqrtForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RsqrtBackward,
-                    infini_train::kernels::maca::RsqrtBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ExpForward, infini_train::kernels::maca::ExpForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ExpBackward,
-                    infini_train::kernels::maca::ExpBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LogForward, infini_train::kernels::maca::LogForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LogBackward,
-                    infini_train::kernels::maca::LogBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EqualsForward,
-                    infini_train::kernels::maca::EqualsForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EqualsScalarForward,
-                    infini_train::kernels::maca::EqualsScalarForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LtForward, infini_train::kernels::maca::LtForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LtScalarForward,
-                    infini_train::kernels::maca::LtScalarForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LeForward, infini_train::kernels::maca::LeForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LeScalarForward,
-                    infini_train::kernels::maca::LeScalarForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GtForward, infini_train::kernels::maca::GtForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GtScalarForward,
-                    infini_train::kernels::maca::GtScalarForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GeForward, infini_train::kernels::maca::GeForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GeScalarForward,
-                    infini_train::kernels::maca::GeScalarForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, OrForward, infini_train::kernels::maca::OrForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AndForward, infini_train::kernels::maca::AndForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddForward, infini_train::kernels::maca::AddForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddBackward,
-                    infini_train::kernels::maca::AddBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddScalarForward,
-                    infini_train::kernels::maca::AddScalarForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddScalarBackward,
-                    infini_train::kernels::maca::AddScalarBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SubForward, infini_train::kernels::maca::SubForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SubBackward,
-                    infini_train::kernels::maca::SubBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulForward, infini_train::kernels::maca::MulForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulBackward,
-                    infini_train::kernels::maca::MulBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulScalarForward,
-                    infini_train::kernels::maca::MulScalarForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulScalarBackward,
-                    infini_train::kernels::maca::MulScalarBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, DivForward, infini_train::kernels::maca::DivForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, DivBackward,
-                    infini_train::kernels::maca::DivBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SigmoidForward,
-                    infini_train::kernels::maca::SigmoidForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SigmoidBackward,
-                    infini_train::kernels::maca::SigmoidBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NegForward, infini_train::kernels::maca::NegForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, NegBackward, infini_train::kernels::maca::NegBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ReciprocalForward,
+                infini_train::kernels::maca::ReciprocalForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ReciprocalBackward,
+                infini_train::kernels::maca::ReciprocalBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SinForward, infini_train::kernels::maca::SinForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SinBackward, infini_train::kernels::maca::SinBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CosForward, infini_train::kernels::maca::CosForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CosBackward, infini_train::kernels::maca::CosBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TanhForward, infini_train::kernels::maca::TanhForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TanhBackward, infini_train::kernels::maca::TanhBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, PowForward, infini_train::kernels::maca::PowForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, PowBackward, infini_train::kernels::maca::PowBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RsqrtForward, infini_train::kernels::maca::RsqrtForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RsqrtBackward,
+                infini_train::kernels::maca::RsqrtBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ExpForward, infini_train::kernels::maca::ExpForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ExpBackward, infini_train::kernels::maca::ExpBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LogForward, infini_train::kernels::maca::LogForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LogBackward, infini_train::kernels::maca::LogBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EqualsForward,
+                infini_train::kernels::maca::EqualsForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EqualsScalarForward,
+                infini_train::kernels::maca::EqualsScalarForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LtForward, infini_train::kernels::maca::LtForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LtScalarForward,
+                infini_train::kernels::maca::LtScalarForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LeForward, infini_train::kernels::maca::LeForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, LeScalarForward,
+                infini_train::kernels::maca::LeScalarForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GtForward, infini_train::kernels::maca::GtForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GtScalarForward,
+                infini_train::kernels::maca::GtScalarForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GeForward, infini_train::kernels::maca::GeForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, GeScalarForward,
+                infini_train::kernels::maca::GeScalarForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, OrForward, infini_train::kernels::maca::OrForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AndForward, infini_train::kernels::maca::AndForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddForward, infini_train::kernels::maca::AddForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddBackward, infini_train::kernels::maca::AddBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddScalarForward,
+                infini_train::kernels::maca::AddScalarForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, AddScalarBackward,
+                infini_train::kernels::maca::AddScalarBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SubForward, infini_train::kernels::maca::SubForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SubBackward, infini_train::kernels::maca::SubBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulForward, infini_train::kernels::maca::MulForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulBackward, infini_train::kernels::maca::MulBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulScalarForward,
+                infini_train::kernels::maca::MulScalarForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MulScalarBackward,
+                infini_train::kernels::maca::MulScalarBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, DivForward, infini_train::kernels::maca::DivForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, DivBackward, infini_train::kernels::maca::DivBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SigmoidForward,
+                infini_train::kernels::maca::SigmoidForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SigmoidBackward,
+                infini_train::kernels::maca::SigmoidBackward)
 
 } // namespace infini_train::kernels::maca

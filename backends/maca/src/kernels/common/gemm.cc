@@ -66,8 +66,6 @@ void Gemm(Device device, GemmParams params) {
     }
 }
 
-void RegisterGemmKernels() {
-    REGISTER_KERNEL(Device::DeviceType::kPrivateUse1, Gemm, infini_train::kernels::maca::Gemm)
-}
+REGISTER_KERNEL(Device::DeviceType::kPrivateUse1, Gemm, infini_train::kernels::maca::Gemm)
 
 } // namespace infini_train::kernels::maca

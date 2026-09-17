@@ -201,11 +201,8 @@ std::shared_ptr<Tensor> SliceBackward(const std::shared_ptr<Tensor> &grad_output
 
 namespace infini_train::kernels::maca {
 
-void RegisterSliceKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SliceForward,
-                    infini_train::kernels::maca::SliceForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SliceBackward,
-                    infini_train::kernels::maca::SliceBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SliceForward, infini_train::kernels::maca::SliceForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SliceBackward,
+                infini_train::kernels::maca::SliceBackward)
 
 } // namespace infini_train::kernels::maca

@@ -581,27 +581,19 @@ std::shared_ptr<Tensor> RepeatInterleaveBackward(const std::shared_ptr<Tensor> &
 
 namespace infini_train::kernels::maca {
 
-void RegisterTransformKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TrilForward,
-                    infini_train::kernels::maca::TrilForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TrilBackward,
-                    infini_train::kernels::maca::TrilBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TriuForward,
-                    infini_train::kernels::maca::TriuForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TriuBackward,
-                    infini_train::kernels::maca::TriuBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TransposeForward,
-                    infini_train::kernels::maca::TransposeForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TransposeBackward,
-                    infini_train::kernels::maca::TransposeBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaskForward,
-                    infini_train::kernels::maca::MaskForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaskBackward,
-                    infini_train::kernels::maca::MaskBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RepeatInterleaveForward,
-                    infini_train::kernels::maca::RepeatInterleaveForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RepeatInterleaveBackward,
-                    infini_train::kernels::maca::RepeatInterleaveBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TrilForward, infini_train::kernels::maca::TrilForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TrilBackward, infini_train::kernels::maca::TrilBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TriuForward, infini_train::kernels::maca::TriuForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TriuBackward, infini_train::kernels::maca::TriuBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TransposeForward,
+                infini_train::kernels::maca::TransposeForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, TransposeBackward,
+                infini_train::kernels::maca::TransposeBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaskForward, infini_train::kernels::maca::MaskForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaskBackward, infini_train::kernels::maca::MaskBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RepeatInterleaveForward,
+                infini_train::kernels::maca::RepeatInterleaveForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, RepeatInterleaveBackward,
+                infini_train::kernels::maca::RepeatInterleaveBackward)
 
 } // namespace infini_train::kernels::maca

@@ -6,8 +6,6 @@
 
 namespace infini_train::core::maca {
 
-void RegisterMcclBackend();
-
 class McclImpl final : public CclImpl {
 public:
     Device::DeviceType Type() const override;

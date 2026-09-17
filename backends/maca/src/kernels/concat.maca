@@ -245,11 +245,9 @@ std::vector<std::shared_ptr<Tensor>> ConcatBackward(const std::shared_ptr<Tensor
 
 namespace infini_train::kernels::maca {
 
-void RegisterConcatKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ConcatForward,
-                    infini_train::kernels::maca::ConcatForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ConcatBackward,
-                    infini_train::kernels::maca::ConcatBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ConcatForward,
+                infini_train::kernels::maca::ConcatForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, ConcatBackward,
+                infini_train::kernels::maca::ConcatBackward)
 
 } // namespace infini_train::kernels::maca

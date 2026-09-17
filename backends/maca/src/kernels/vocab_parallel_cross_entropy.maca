@@ -124,9 +124,7 @@ VocabParallelCrossEntropyBackward(const std::shared_ptr<Tensor> &grad_output,   
 
 namespace infini_train::kernels::maca {
 
-void RegisterVocabParallelCrossEntropyKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, VocabParallelCrossEntropyBackward,
-                    infini_train::kernels::maca::VocabParallelCrossEntropyBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, VocabParallelCrossEntropyBackward,
+                infini_train::kernels::maca::VocabParallelCrossEntropyBackward)
 
 } // namespace infini_train::kernels::maca

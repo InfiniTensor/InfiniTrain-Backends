@@ -180,11 +180,8 @@ std::shared_ptr<Tensor> SplitBackward(const std::vector<int64_t> &input_dims, in
 
 namespace infini_train::kernels::maca {
 
-void RegisterSplitKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SplitForward,
-                    infini_train::kernels::maca::SplitForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SplitBackward,
-                    infini_train::kernels::maca::SplitBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SplitForward, infini_train::kernels::maca::SplitForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SplitBackward,
+                infini_train::kernels::maca::SplitBackward)
 
 } // namespace infini_train::kernels::maca

@@ -239,20 +239,13 @@ std::shared_ptr<Tensor> MinBackward(const std::shared_ptr<Tensor> &grad_output, 
 
 namespace infini_train::kernels::maca {
 
-void RegisterReductionKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MeanForward,
-                    infini_train::kernels::maca::MeanForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SumForward, infini_train::kernels::maca::SumForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaxForward, infini_train::kernels::maca::MaxForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MinForward, infini_train::kernels::maca::MinForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MeanBackward,
-                    infini_train::kernels::maca::MeanBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SumBackward,
-                    infini_train::kernels::maca::SumBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaxBackward,
-                    infini_train::kernels::maca::MaxBackward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MinBackward,
-                    infini_train::kernels::maca::MinBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MeanForward, infini_train::kernels::maca::MeanForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SumForward, infini_train::kernels::maca::SumForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaxForward, infini_train::kernels::maca::MaxForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MinForward, infini_train::kernels::maca::MinForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MeanBackward, infini_train::kernels::maca::MeanBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, SumBackward, infini_train::kernels::maca::SumBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MaxBackward, infini_train::kernels::maca::MaxBackward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, MinBackward, infini_train::kernels::maca::MinBackward)
 
 } // namespace infini_train::kernels::maca

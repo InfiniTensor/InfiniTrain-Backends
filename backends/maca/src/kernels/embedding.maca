@@ -126,11 +126,9 @@ std::shared_ptr<Tensor> EmbeddingBackward(const std::shared_ptr<Tensor> &input, 
 
 namespace infini_train::kernels::maca {
 
-void RegisterEmbeddingKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EmbeddingForward,
-                    infini_train::kernels::maca::EmbeddingForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EmbeddingBackward,
-                    infini_train::kernels::maca::EmbeddingBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EmbeddingForward,
+                infini_train::kernels::maca::EmbeddingForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, EmbeddingBackward,
+                infini_train::kernels::maca::EmbeddingBackward)
 
 } // namespace infini_train::kernels::maca

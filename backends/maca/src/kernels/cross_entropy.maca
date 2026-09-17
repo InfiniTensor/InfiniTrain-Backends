@@ -226,11 +226,9 @@ std::shared_ptr<Tensor> CrossEntropyBackward(const std::shared_ptr<Tensor> &inpu
 
 namespace infini_train::kernels::maca {
 
-void RegisterCrossEntropyKernels() {
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CrossEntropyForward,
-                    infini_train::kernels::maca::CrossEntropyForward)
-    REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CrossEntropyBackward,
-                    infini_train::kernels::maca::CrossEntropyBackward)
-}
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CrossEntropyForward,
+                infini_train::kernels::maca::CrossEntropyForward)
+REGISTER_KERNEL(infini_train::Device::DeviceType::kPrivateUse1, CrossEntropyBackward,
+                infini_train::kernels::maca::CrossEntropyBackward)
 
 } // namespace infini_train::kernels::maca
