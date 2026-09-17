@@ -185,13 +185,33 @@ produce a final executable may link `InfiniTrain::Backend::MACA`.
 
 ## MACA Runtime Notes
 
-- `MACA_LAUNCH_BLOCKING`: Unless already set by the user, the provider sets it
-  to `1` immediately before lazy runtime initialization. Set the variable
-  before the first device use to override it.
-- `MCCL_P2P_DISABLE`: Immediately before runtime initialization, the provider
-  reads `--tensor_parallel` from the process command line and sets this to `1`
-  when the value is greater than one. An explicit environment value is
-  preserved. Data-parallel jobs leave it unset to retain MCCL's P2P fast path.
+Configure these independent boolean flags in each test's `args` in
+`backends/maca/scripts/test_config_maca.json`. The multithread workaround
+defaults to `true`, pool retention defaults to `false`, and the runtime does
+not infer a mode from the thread or process count.
+
+| Flag | Default | Behavior |
+| --- | --- | --- |
+| `--maca_multithread_workarounds=true\|false` | `true` | Enables synchronous allocation/free, the copy mutex, default launch blocking, and the existing example synchronization/exit workarounds. |
+| `--maca_retain_async_pool=true\|false` | `false` | Retains pages in the SDK default async pool for reuse by setting its release threshold to `UINT64_MAX`. |
+
+The JSON omits redundant `maca_multithread_workarounds=true` entries and
+explicitly disables that flag for cases using the native async path. It enables
+pool retention for every `8_proc` case and omits that flag in all other groups.
+Pool retention avoids
+the reproduced MACA 3.5.3.18 ATU fault in mixed parallel training by keeping idle
+pages available for reuse; explicit trimming can reintroduce the fault.
+
+Parse flags before first device use. The runtime captures their values once.
+Explicit `MACA_LAUNCH_BLOCKING` and `MCCL_P2P_DISABLE` environment values retain
+precedence. When workarounds are enabled, the provider defaults launch blocking
+to `1` and also defaults `MCCL_P2P_DISABLE` to `1` for TP > 1. With workarounds
+disabled it sets neither variable; multiprocess TP therefore needs separate
+validation with the SDK's native P2P behavior. Example workarounds stay
+in InfiniTrain and are selected by one optional build-time flag binding.
+Large MCCL all-reduce messages are segmented at 160 MiB by default; set
+`INFINI_MCCL_ALLREDUCE_SEGMENT_MB=0` to disable segmentation. The previous custom
+cache optimization remains stashed.
 
 ## Architecture
 

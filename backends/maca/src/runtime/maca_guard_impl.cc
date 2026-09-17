@@ -12,16 +12,21 @@
 #include <utility>
 #include <vector>
 
+#include "gflags/gflags.h"
+
 #include "infini_train/include/core/runtime/runtime_common.h"
 #include "infini_train/include/device.h"
 
 #include "common/common_maca.h"
 #include "runtime/maca_runtime_common.h"
 
+DEFINE_bool(maca_multithread_workarounds, true, "Enable MACA multithread allocation, copy and example workarounds");
+DEFINE_bool(maca_retain_async_pool, false, "Retain pages in the MACA default async memory pool");
+
 namespace infini_train::core::maca {
 namespace {
 // Read /proc/self/cmdline and return --tensor_parallel value, or 1 if absent
-// or unparseable. This does not depend on gflags and runs before mcInit.
+// or unparseable.
 int ReadTensorParallelFromCmdline() {
     std::ifstream in("/proc/self/cmdline", std::ios::binary);
     if (!in) {
@@ -63,6 +68,10 @@ int ReadTensorParallelFromCmdline() {
     }
     return 1;
 }
+
+// Capture flags once so allocation and free always use the same implementation.
+static bool g_multithread_workarounds = false;
+static bool g_retain_async_pool = false;
 
 static std::vector<std::unique_ptr<MacaStream>> g_maca_streams;
 static std::vector<std::unique_ptr<MacaBlasHandle>> g_maca_blas_handles;
@@ -107,6 +116,16 @@ void MacaGuardImpl::InitSingleStream(Device device) {
 
     g_maca_streams[device.index()] = std::make_unique<MacaStream>();
 
+    if (g_retain_async_pool) {
+        // FIXME(cx): MACA 3.5.3.18 can fault when the default async pool releases
+        // pages to the driver and later allocations reuse that address range.
+        // Keep freed blocks resident; explicit mcMemPoolTrimTo can still release them.
+        mcMemPool_t pool;
+        MACA_CHECK(mcDeviceGetDefaultMemPool(&pool, device.index()));
+        uint64_t threshold = std::numeric_limits<uint64_t>::max();
+        MACA_CHECK(mcMemPoolSetAttribute(pool, mcMemPoolAttrReleaseThreshold, &threshold));
+    }
+
     MACA_CHECK(mcSetDevice(current_device));
 }
 
@@ -129,12 +148,22 @@ void MacaGuardImpl::Initialize() {
         // FIXME(cx): Stop deriving runtime policy from argv and mutating process-wide
         // environment here. Pass MACA runtime/communication policy through explicit
         // provider or launcher configuration instead.
-        // Apply provider runtime policy immediately before mcInit. Users may
-        // override it in the process environment before first device use.
-        setenv("MACA_LAUNCH_BLOCKING", "1", 0);
-        if (ReadTensorParallelFromCmdline() > 1) {
-            setenv("MCCL_P2P_DISABLE", "1", 0);
+        g_multithread_workarounds = FLAGS_maca_multithread_workarounds;
+        g_retain_async_pool = FLAGS_maca_retain_async_pool;
+        if (g_multithread_workarounds) {
+            setenv("MACA_LAUNCH_BLOCKING", "1", 0);
+            if (ReadTensorParallelFromCmdline() > 1) {
+                setenv("MCCL_P2P_DISABLE", "1", 0);
+            }
         }
+
+        const char *blocking = std::getenv("MACA_LAUNCH_BLOCKING");
+        const char *p2p = std::getenv("MCCL_P2P_DISABLE");
+        LOG(ERROR) << "MACA runtime: multithread_workarounds=" << (g_multithread_workarounds ? "true" : "false")
+                   << " allocator=" << (g_multithread_workarounds ? "sync" : "async")
+                   << " retain_async_pool=" << (g_retain_async_pool ? "true" : "false")
+                   << " MACA_LAUNCH_BLOCKING=" << (blocking ? blocking : "unset")
+                   << " MCCL_P2P_DISABLE=" << (p2p ? p2p : "unset");
         MACA_CHECK(mcInit(0));
 
         int device_count = 0;
@@ -296,30 +325,48 @@ BlasHandle *MacaGuardImpl::GetBlasHandle(Device device) const {
 }
 
 // memory
-void MacaGuardImpl::Malloc(void **dev_ptr, size_t size) { MACA_CHECK(mcMalloc(dev_ptr, size)); }
+void MacaGuardImpl::Malloc(void **dev_ptr, size_t size) {
+    const mcError_t status = mcMalloc(dev_ptr, size);
+    if (status == mcErrorMemoryAllocation) {
+        int device_index = -1;
+        size_t free_bytes = 0, total_bytes = 0;
+        const mcError_t device_status = mcGetDevice(&device_index);
+        const mcError_t memory_status = mcMemGetInfo(&free_bytes, &total_bytes);
+        LOG(ERROR) << "MACA allocation failed: requested_bytes=" << size << " device=" << device_index
+                   << " free_bytes=" << free_bytes << " total_bytes=" << total_bytes
+                   << " device_query=" << mcGetErrorString(device_status)
+                   << " memory_query=" << mcGetErrorString(memory_status);
+    }
+    MACA_CHECK(status);
+}
 
 void MacaGuardImpl::MallocAsync(void **dev_ptr, size_t size, Stream *stream) {
-    // NOTE(dcj): mcMallocAsync with a per-stream mempool gives a big speedup
-    // (~2x on gpt2 DDP steady-state) vs synchronous mcMalloc, but under
-    // multi-thread DDP init bursts (e.g. llama3 1B with nthread=8 uploading
-    // hundreds of param tensors) it races with MACA's auto P2P peer-mapping
-    // and produces mcErrorInvalidValue on subsequent mcMemcpyAsync, or
-    // "readonly page" faults -- no amount of mutex/stream-sync serialization
-    // around the alloc call suppresses this. Keep the synchronous path for
-    // correctness.
-    // auto maca_stream = GetMacaStream(stream);
-    // MACA_CHECK(mcMallocAsync(dev_ptr, size, maca_stream));
-    (void)stream;
-    Malloc(dev_ptr, size);
+    if (size == 0) {
+        *dev_ptr = nullptr;
+        return;
+    }
+    if (g_multithread_workarounds) {
+        Malloc(dev_ptr, size);
+        return;
+    }
+    auto maca_stream = GetMacaStream(stream);
+    MACA_CHECK(mcMallocAsync(dev_ptr, size, maca_stream));
 }
 
 void MacaGuardImpl::Free(void *dev_ptr) { MACA_CHECK(mcFree(dev_ptr)); }
 
 void MacaGuardImpl::FreeAsync(void *dev_ptr, Stream *stream) {
-    // auto maca_stream = GetMacaStream(stream);
-    // MACA_CHECK(mcFreeAsync(dev_ptr, maca_stream));
-    (void)stream;
-    Free(dev_ptr);
+    if (dev_ptr == nullptr) {
+        return;
+    }
+    auto maca_stream = GetMacaStream(stream);
+    if (g_multithread_workarounds) {
+        // A synchronous free must wait for work already submitted to this stream.
+        MACA_CHECK(mcStreamSynchronize(maca_stream));
+        Free(dev_ptr);
+        return;
+    }
+    MACA_CHECK(mcFreeAsync(dev_ptr, maca_stream));
 }
 
 void MacaGuardImpl::Memcpy(void *dst, const void *src, size_t count, MemcpyKind kind) {
@@ -335,7 +382,10 @@ void MacaGuardImpl::Memcpy(void *dst, const void *src, size_t count, MemcpyKind 
 }
 
 void MacaGuardImpl::MemcpyAsync(void *dst, const void *src, size_t count, MemcpyKind kind, Stream *stream) {
-    std::lock_guard<std::mutex> lock(g_memcpy_mutex);
+    std::unique_lock<std::mutex> lock(g_memcpy_mutex, std::defer_lock);
+    if (g_multithread_workarounds) {
+        lock.lock();
+    }
     auto maca_stream = GetMacaStream(stream);
 
     switch (kind) {

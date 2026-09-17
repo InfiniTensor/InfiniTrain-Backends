@@ -578,7 +578,9 @@
                         "nthread_per_process": 1,
                         "num_iteration": 10,
                         "batch_size": 10,
-                        "total_batch_size": 5120
+                        "total_batch_size": 5120,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -588,7 +590,9 @@
                         "nthread_per_process": 1,
                         "num_iteration": 10,
                         "batch_size": 10,
-                        "total_batch_size": 5120
+                        "total_batch_size": 5120,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -599,7 +603,9 @@
                         "num_iteration": 10,
                         "batch_size": 40,
                         "total_batch_size": 5120,
-                        "tensor_parallel": 4
+                        "tensor_parallel": 4,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -610,7 +616,9 @@
                         "num_iteration": 10,
                         "batch_size": 40,
                         "total_batch_size": 5120,
-                        "tensor_parallel": 4
+                        "tensor_parallel": 4,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -622,7 +630,9 @@
                         "batch_size": 40,
                         "total_batch_size": 5120,
                         "tensor_parallel": 4,
-                        "sequence_parallel": true
+                        "sequence_parallel": true,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -634,7 +644,9 @@
                         "batch_size": 40,
                         "total_batch_size": 5120,
                         "tensor_parallel": 4,
-                        "sequence_parallel": true
+                        "sequence_parallel": true,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -645,7 +657,9 @@
                         "num_iteration": 10,
                         "batch_size": 10,
                         "total_batch_size": 5120,
-                        "pipeline_parallel": 8
+                        "pipeline_parallel": 8,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -656,7 +670,9 @@
                         "num_iteration": 10,
                         "batch_size": 10,
                         "total_batch_size": 5120,
-                        "pipeline_parallel": 8
+                        "pipeline_parallel": 8,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -670,7 +686,9 @@
                         "tensor_parallel": 2,
                         "sequence_parallel": true,
                         "pipeline_parallel": 2,
-                        "virtual_pipeline_parallel": 2
+                        "virtual_pipeline_parallel": 2,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -684,7 +702,9 @@
                         "tensor_parallel": 2,
                         "sequence_parallel": true,
                         "pipeline_parallel": 2,
-                        "virtual_pipeline_parallel": 2
+                        "virtual_pipeline_parallel": 2,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 }
             ]
