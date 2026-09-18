@@ -339,9 +339,8 @@ std::shared_ptr<Tensor> LinearBackwardInput(const std::shared_ptr<Tensor> &weigh
     auto output_dtype = (compute_dtype == DataType::kBFLOAT16) ? DataType::kFLOAT32 : compute_dtype;
     auto grad_input = std::make_shared<Tensor>(input_dims, output_dtype, grad_output->GetDevice());
 
-    auto device = grad_output->GetDevice();
-
     // d_input = d_output * weight (transposed weight layout) or d_output * weight.T.
+    auto device = grad_output->GetDevice();
     Dispatcher::Instance().Call<void>(
         {device.type(), "Gemm"}, device,
         GemmParams{
