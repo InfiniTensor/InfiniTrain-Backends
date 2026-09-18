@@ -31,13 +31,17 @@
                 {
                     "id": "1",
                     "args": {
-                        "dtype": "float32"
+                        "dtype": "float32",
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
                     "id": "1_bfloat16",
                     "args": {
-                        "dtype": "bfloat16"
+                        "dtype": "bfloat16",
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -46,7 +50,9 @@
                         "dtype": "float32",
                         "num_iteration": 10,
                         "batch_size": 80,
-                        "total_batch_size": 5120
+                        "total_batch_size": 5120,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
@@ -55,7 +61,9 @@
                         "dtype": "bfloat16",
                         "num_iteration": 10,
                         "batch_size": 80,
-                        "total_batch_size": 5120
+                        "total_batch_size": 5120,
+                        "maca_multithread_workarounds": false,
+                        "maca_retain_async_pool": true
                     }
                 },
                 {
