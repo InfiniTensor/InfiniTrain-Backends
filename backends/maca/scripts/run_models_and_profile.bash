@@ -4,7 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-INFINITRAIN_SOURCE_DIR="${INFINITRAIN_SOURCE_DIR:-${REPOSITORY_ROOT}/third_party/InfiniTrain}"
+CONFIGURED_INFINITRAIN_SOURCE_DIR="$(
+    jq -r '[.basic_compile_commands[].cmd
+            | capture("-DINFINITRAIN_SOURCE_DIR=(?<source_dir>[^ ]+)").source_dir]
+          | first // empty' "${SCRIPT_DIR}/test_config_maca.json"
+)"
+INFINITRAIN_SOURCE_DIR="${INFINITRAIN_SOURCE_DIR:-${CONFIGURED_INFINITRAIN_SOURCE_DIR:-${REPOSITORY_ROOT}/third_party/InfiniTrain}}"
 UPSTREAM_RUNNER="${INFINITRAIN_SOURCE_DIR}/scripts/run_models_and_profile.bash"
 
 if [[ ! -x "${UPSTREAM_RUNNER}" ]]; then
