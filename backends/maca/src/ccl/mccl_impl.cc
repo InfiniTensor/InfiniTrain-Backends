@@ -5,10 +5,11 @@
 #include <cstddef>
 #include <cstdlib>
 #include <limits>
-#include <mccl.h>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <mccl.h>
 
 #include "glog/logging.h"
 

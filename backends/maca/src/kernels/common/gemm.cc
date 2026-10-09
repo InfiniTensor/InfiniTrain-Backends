@@ -4,9 +4,10 @@
 
 #include "glog/logging.h"
 
-#include "common/common_maca.h"
 #include "infini_train/include/core/runtime/device_guard.h"
 #include "infini_train/include/dispatcher.h"
+
+#include "common/common_maca.h"
 #include "runtime/maca_runtime_common.h"
 
 namespace infini_train::kernels::maca {
