@@ -326,7 +326,8 @@
                         "dtype": "float32",
                         "lora_rank": 8,
                         "lora_alpha": 16.0,
-                        "lora_target_modules": "c_attn,attn.c_proj"
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
@@ -335,7 +336,8 @@
                         "dtype": "bfloat16",
                         "lora_rank": 8,
                         "lora_alpha": 16.0,
-                        "lora_target_modules": "c_attn,attn.c_proj"
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
@@ -347,7 +349,8 @@
                         "total_batch_size": 5120,
                         "lora_rank": 8,
                         "lora_alpha": 16.0,
-                        "lora_target_modules": "c_attn,attn.c_proj"
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
@@ -359,7 +362,8 @@
                         "total_batch_size": 5120,
                         "lora_rank": 8,
                         "lora_alpha": 16.0,
-                        "lora_target_modules": "c_attn,attn.c_proj"
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
@@ -372,7 +376,8 @@
                         "total_batch_size": 5120,
                         "lora_rank": 8,
                         "lora_alpha": 16.0,
-                        "lora_target_modules": "c_attn,attn.c_proj"
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
@@ -385,7 +390,8 @@
                         "total_batch_size": 5120,
                         "lora_rank": 8,
                         "lora_alpha": 16.0,
-                        "lora_target_modules": "c_attn,attn.c_proj"
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
@@ -397,9 +403,10 @@
                         "batch_size": 40,
                         "total_batch_size": 5120,
                         "tensor_parallel": 4,
-                        "lora_rank": 4,
-                        "lora_alpha": 8.0,
-                        "lora_target_modules": "c_attn,c_fc,c_proj"
+                        "lora_rank": 8,
+                        "lora_alpha": 16.0,
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
@@ -411,9 +418,10 @@
                         "batch_size": 40,
                         "total_batch_size": 5120,
                         "tensor_parallel": 4,
-                        "lora_rank": 16,
-                        "lora_alpha": 32.0,
-                        "lora_target_modules": "c_attn,c_fc,c_proj"
+                        "lora_rank": 8,
+                        "lora_alpha": 16.0,
+                        "lora_target_modules": "c_attn,attn.c_proj",
+                        "lora_load_path": "$LORA_WEIGHTS_DIR"
                     }
                 },
                 {
