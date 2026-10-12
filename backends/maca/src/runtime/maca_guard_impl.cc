@@ -1,5 +1,6 @@
 #include "runtime/maca_guard_impl.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -9,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -25,6 +27,8 @@ DEFINE_bool(maca_retain_async_pool, false, "Retain pages in the MACA default asy
 
 namespace infini_train::core::maca {
 namespace {
+constexpr size_t kBytesPerMB = 1024ULL * 1024ULL;
+
 // Read /proc/self/cmdline and return --tensor_parallel value, or 1 if absent
 // or unparseable.
 int ReadTensorParallelFromCmdline() {
@@ -85,6 +89,54 @@ static std::vector<std::unique_ptr<std::once_flag>> g_device_handle_flags;
 // mcErrorInvalidValue. The lock is held only for the brief window of the
 // API call itself; actual GPU work remains async on the caller's stream.
 static std::mutex g_memcpy_mutex;
+
+struct AllocationRecord {
+    int device_index = -1;
+    size_t size = 0;
+};
+
+struct AllocationStats {
+    size_t current = 0;
+    size_t high = 0;
+};
+
+// Synchronous mcMalloc allocations are not included in the default async
+// mempool attributes, so track them separately and merge both peak values.
+static std::mutex g_allocation_mutex;
+static std::unordered_map<void *, AllocationRecord> g_allocations;
+static std::vector<AllocationStats> g_allocation_stats;
+
+void TrackAllocation(void *ptr, int device_index, size_t size) {
+    if (ptr == nullptr) {
+        return;
+    }
+
+    CHECK(device_index >= 0 && static_cast<size_t>(device_index) < g_allocation_stats.size()) << std::format(
+        "MACA device index {} out of allocation stats range [0, {}).", device_index, g_allocation_stats.size());
+
+    std::lock_guard<std::mutex> lock(g_allocation_mutex);
+    g_allocations[ptr] = AllocationRecord{device_index, size};
+    auto &stats = g_allocation_stats.at(device_index);
+    stats.current += size;
+    stats.high = std::max(stats.high, stats.current);
+}
+
+void UntrackAllocation(void *ptr) {
+    if (ptr == nullptr) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_allocation_mutex);
+    auto it = g_allocations.find(ptr);
+    if (it == g_allocations.end()) {
+        return;
+    }
+
+    auto &stats = g_allocation_stats.at(it->second.device_index);
+    CHECK_GE(stats.current, it->second.size) << "MACA allocation tracker underflow.";
+    stats.current -= it->second.size;
+    g_allocations.erase(it);
+}
 
 inline void CheckMacaDevice(Device device) {
     CHECK(device.type() == Device::DeviceType::kPrivateUse1) << std::format(
@@ -174,6 +226,7 @@ void MacaGuardImpl::Initialize() {
 
         g_maca_streams.resize(device_count);
         g_maca_blas_handles.resize(device_count);
+        g_allocation_stats.resize(device_count);
         g_device_stream_flags.reserve(device_count);
         g_device_handle_flags.reserve(device_count);
         for (int i = 0; i < device_count; ++i) {
@@ -338,6 +391,10 @@ void MacaGuardImpl::Malloc(void **dev_ptr, size_t size) {
                    << " memory_query=" << mcGetErrorString(memory_status);
     }
     MACA_CHECK(status);
+
+    int device_index = -1;
+    MACA_CHECK(mcGetDevice(&device_index));
+    TrackAllocation(*dev_ptr, device_index, size);
 }
 
 void MacaGuardImpl::MallocAsync(void **dev_ptr, size_t size, Stream *stream) {
@@ -353,7 +410,10 @@ void MacaGuardImpl::MallocAsync(void **dev_ptr, size_t size, Stream *stream) {
     MACA_CHECK(mcMallocAsync(dev_ptr, size, maca_stream));
 }
 
-void MacaGuardImpl::Free(void *dev_ptr) { MACA_CHECK(mcFree(dev_ptr)); }
+void MacaGuardImpl::Free(void *dev_ptr) {
+    UntrackAllocation(dev_ptr);
+    MACA_CHECK(mcFree(dev_ptr));
+}
 
 void MacaGuardImpl::FreeAsync(void *dev_ptr, Stream *stream) {
     if (dev_ptr == nullptr) {
@@ -366,6 +426,7 @@ void MacaGuardImpl::FreeAsync(void *dev_ptr, Stream *stream) {
         Free(dev_ptr);
         return;
     }
+    UntrackAllocation(dev_ptr);
     MACA_CHECK(mcFreeAsync(dev_ptr, maca_stream));
 }
 
@@ -404,14 +465,55 @@ void MacaGuardImpl::MemcpyAsync(void *dst, const void *src, size_t count, Memcpy
 }
 
 void MacaGuardImpl::ResetMemPoolHighWatermarks(Device device) const {
-    // MetaX SDK support for the mempool high-watermark attributes is not
-    // confirmed. Keep this a no-op, matching feat/muxi_device_registry.
-    (void)device;
+    CheckMacaDevice(device);
+
+    int current_device = -1;
+    MACA_CHECK(mcGetDevice(&current_device));
+
+    SetDevice(device);
+    mcMemPool_t pool;
+    MACA_CHECK(mcDeviceGetDefaultMemPool(&pool, device.index()));
+
+    uint64_t zero = 0;
+    MACA_CHECK(mcMemPoolSetAttribute(pool, mcMemPoolAttrUsedMemHigh, &zero));
+    MACA_CHECK(mcMemPoolSetAttribute(pool, mcMemPoolAttrReservedMemHigh, &zero));
+
+    {
+        std::lock_guard<std::mutex> lock(g_allocation_mutex);
+        auto &stats = g_allocation_stats.at(device.index());
+        stats.high = stats.current;
+    }
+
+    MACA_CHECK(mcSetDevice(current_device));
 }
 
 std::pair<size_t, size_t> MacaGuardImpl::GetMemPoolPeakMB(Device device) const {
-    (void)device;
-    return std::make_pair<size_t, size_t>(0, 0);
+    CheckMacaDevice(device);
+
+    int current_device = -1;
+    MACA_CHECK(mcGetDevice(&current_device));
+
+    SetDevice(device);
+    mcMemPool_t pool;
+    MACA_CHECK(mcDeviceGetDefaultMemPool(&pool, device.index()));
+
+    uint64_t used = 0;
+    MACA_CHECK(mcMemPoolGetAttribute(pool, mcMemPoolAttrUsedMemHigh, &used));
+
+    uint64_t reserved = 0;
+    MACA_CHECK(mcMemPoolGetAttribute(pool, mcMemPoolAttrReservedMemHigh, &reserved));
+
+    size_t tracked_high = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_allocation_mutex);
+        tracked_high = g_allocation_stats.at(device.index()).high;
+    }
+
+    MACA_CHECK(mcSetDevice(current_device));
+
+    const size_t used_peak = tracked_high + static_cast<size_t>(used);
+    const size_t reserved_peak = tracked_high + static_cast<size_t>(reserved);
+    return {used_peak / kBytesPerMB, reserved_peak / kBytesPerMB};
 }
 
 INFINI_TRAIN_REGISTER_DEVICE_GUARD_IMPL(Device::DeviceType::kPrivateUse1, MacaGuardImpl)
