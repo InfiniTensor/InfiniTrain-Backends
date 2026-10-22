@@ -16,7 +16,7 @@ InfiniTrain Backends 为 [InfiniTrain](https://github.com/InfiniTensor/InfiniTra
 提供独立于框架核心维护的加速器后端。各后端实现 InfiniTrain 的 `PrivateUse1`
 接口，将厂商 SDK 集成、运行时支持、集合通信和算子实现放在框架核心之外。
 
-每个后端位于独立的 `backends/<provider>` 目录中，通常使用锁定提交版本的
+每个后端位于独立的 `backends/<provider>` 目录中，通常使用固定为 `v0.7.0` 的
 InfiniTrain 子模块。每个构建目录只选择一个后端，每个进程最多注册一个
 `DeviceType::kPrivateUse1` 后端。
 

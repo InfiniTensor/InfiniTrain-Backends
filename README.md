@@ -18,8 +18,8 @@ vendor-specific SDK integration, runtime support, collective communication,
 and kernels outside the framework core while implementing InfiniTrain's
 `PrivateUse1` backend interfaces.
 
-Each provider is isolated under `backends/<provider>` and normally consumes a
-pinned InfiniTrain submodule commit. One build tree selects one provider, and a
+Each provider is isolated under `backends/<provider>` and normally consumes the
+InfiniTrain submodule pinned to `v0.7.0`. One build tree selects one provider, and a
 process may register at most one provider for `DeviceType::kPrivateUse1`.
 
 ## Supported Backends

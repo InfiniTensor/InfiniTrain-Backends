@@ -25,20 +25,20 @@ public:
     void CommDestroy(CclComm *comm) const override;
 
     void AllReduce(const void *sendbuff, void *recvbuff, size_t count, DataType dtype,
-                   nn::parallel::function::ReduceOpType reduce_op, const CclComm *comm, Stream *stream) const override;
+                   nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm, Stream *stream) const override;
 
     void Broadcast(const void *sendbuff, void *recvbuff, size_t count, DataType dtype, int root, const CclComm *comm,
                    Stream *stream) const override;
 
     void Reduce(const void *sendbuff, void *recvbuff, size_t count, DataType dtype,
-                nn::parallel::function::ReduceOpType reduce_op, int root, const CclComm *comm,
+                nn::parallel::comm::ReduceOpType reduce_op, int root, const CclComm *comm,
                 Stream *stream) const override;
 
     void AllGather(const void *sendbuff, void *recvbuff, size_t count, DataType dtype, const CclComm *comm,
                    Stream *stream) const override;
 
     void ReduceScatter(const void *sendbuff, void *recvbuff, size_t recv_count, DataType dtype,
-                       nn::parallel::function::ReduceOpType reduce_op, const CclComm *comm,
+                       nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm,
                        Stream *stream) const override;
 
     void Send(const void *buff, size_t count, DataType dtype, int peer, const CclComm *comm,
