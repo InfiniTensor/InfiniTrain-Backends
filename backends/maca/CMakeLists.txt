@@ -81,15 +81,20 @@ if(BUILD_TEST)
 
   # The target suffix and CTest label identify this provider; execution still
   # uses the backend-neutral PrivateUse1 device and GTest prefix.
-  infini_train_add_privateuse1_test_suites(
-    BACKEND_NAME ${INFINITRAIN_BACKEND}
-    DEVICE_INDEX 0
-    LINK_LIBRARIES InfiniTrain::Backend::MACAExecutable
-    BACKEND_HEADER "infini_train_maca/backend.h"
-    BACKEND_REGISTRAR infini_train::maca::RegisterBackend
-    TEST_TIMEOUT 300
-    RUN_SERIAL
-  )
+  block(SCOPE_FOR VARIABLES)
+    # InfiniTrain v0.7.0 resolves common test sources via PROJECT_SOURCE_DIR.
+    # Scope that path to InfiniTrain while creating its provider test targets.
+    set(PROJECT_SOURCE_DIR "${INFINITRAIN_SOURCE_DIR}")
+    infini_train_add_privateuse1_test_suites(
+      BACKEND_NAME ${INFINITRAIN_BACKEND}
+      DEVICE_INDEX 0
+      LINK_LIBRARIES InfiniTrain::Backend::MACAExecutable
+      BACKEND_HEADER "infini_train_maca/backend.h"
+      BACKEND_REGISTRAR infini_train::maca::RegisterBackend
+      TEST_TIMEOUT 300
+      RUN_SERIAL
+    )
+  endblock()
 endif()
 
 if(INFINITRAIN_BACKENDS_BUILD_EXAMPLES)

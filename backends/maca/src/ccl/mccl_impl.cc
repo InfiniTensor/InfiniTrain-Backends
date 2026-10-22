@@ -15,6 +15,7 @@
 
 #include "infini_train/include/core/runtime/runtime_common.h"
 #include "infini_train/include/device.h"
+#include "infini_train/include/nn/parallel/reduce_op_type.h"
 
 #include "ccl/mccl_common.h"
 #include "common/common_maca.h"
@@ -30,10 +31,10 @@ inline const std::unordered_map<DataType, mcclDataType_t> kMcclDtypeMap = {
     {DataType::kFLOAT64, mcclFloat64},
 };
 
-inline const std::unordered_map<nn::parallel::function::ReduceOpType, mcclRedOp_t> kMcclReduceOpMap = {
-    {nn::parallel::function::ReduceOpType::kSum, mcclSum}, {nn::parallel::function::ReduceOpType::kProd, mcclProd},
-    {nn::parallel::function::ReduceOpType::kMin, mcclMin}, {nn::parallel::function::ReduceOpType::kMax, mcclMax},
-    {nn::parallel::function::ReduceOpType::kAvg, mcclAvg},
+inline const std::unordered_map<nn::parallel::comm::ReduceOpType, mcclRedOp_t> kMcclReduceOpMap = {
+    {nn::parallel::comm::ReduceOpType::kSum, mcclSum}, {nn::parallel::comm::ReduceOpType::kProd, mcclProd},
+    {nn::parallel::comm::ReduceOpType::kMin, mcclMin}, {nn::parallel::comm::ReduceOpType::kMax, mcclMax},
+    {nn::parallel::comm::ReduceOpType::kAvg, mcclAvg},
 };
 
 inline mcclComm_t GetMcclComm(const CclComm *comm) {
@@ -123,7 +124,7 @@ void McclImpl::CommDestroy(CclComm *comm) const {
 }
 
 void McclImpl::AllReduce(const void *sendbuff, void *recvbuff, size_t count, DataType dtype,
-                         nn::parallel::function::ReduceOpType reduce_op, const CclComm *comm, Stream *stream) const {
+                         nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm, Stream *stream) const {
     // C550 all-reduce bandwidth drops sharply for very large messages. Segment
     // at the provider boundary so every framework caller stays below the cliff.
     constexpr size_t kBytesPerMB = 1024ULL * 1024ULL;
@@ -169,7 +170,7 @@ void McclImpl::Broadcast(const void *sendbuff, void *recvbuff, size_t count, Dat
 }
 
 void McclImpl::Reduce(const void *sendbuff, void *recvbuff, size_t count, DataType dtype,
-                      nn::parallel::function::ReduceOpType reduce_op, int root, const CclComm *comm,
+                      nn::parallel::comm::ReduceOpType reduce_op, int root, const CclComm *comm,
                       Stream *stream) const {
     MCCL_CHECK(mcclReduce(sendbuff, recvbuff, count, kMcclDtypeMap.at(dtype), kMcclReduceOpMap.at(reduce_op), root,
                           GetMcclComm(comm), GetMacaStream(stream)));
@@ -182,7 +183,7 @@ void McclImpl::AllGather(const void *sendbuff, void *recvbuff, size_t count, Dat
 }
 
 void McclImpl::ReduceScatter(const void *sendbuff, void *recvbuff, size_t recv_count, DataType dtype,
-                             nn::parallel::function::ReduceOpType reduce_op, const CclComm *comm,
+                             nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm,
                              Stream *stream) const {
     MCCL_CHECK(mcclReduceScatter(sendbuff, recvbuff, recv_count, kMcclDtypeMap.at(dtype),
                                  kMcclReduceOpMap.at(reduce_op), GetMcclComm(comm), GetMacaStream(stream)));
