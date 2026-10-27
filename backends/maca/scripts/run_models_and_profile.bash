@@ -111,12 +111,17 @@ def main():
     elif action == "merge":
         base, overrides = map(load, arguments)
         config = merge(base, {k: v for k, v in overrides.items() if k != "test_groups"})
-        config["test_groups"] = []
-        for override in overrides["test_groups"]:
-            tag = override["tag"]
-            group = next((group for group in base["test_groups"] if group["tag"] == tag), None)
-            if group is None:
+        group_overrides = {group["tag"]: group for group in overrides.get("test_groups", [])}
+        upstream_tags = {group["tag"] for group in base["test_groups"]}
+        for tag in group_overrides:
+            if tag not in upstream_tags:
                 raise ValueError(f"Unknown upstream test group: {tag}")
+
+        # Inherit every upstream group; MACA entries only override its settings.
+        config["test_groups"] = []
+        for group in base["test_groups"]:
+            tag = group["tag"]
+            override = group_overrides.get(tag, {})
             test_ids = {test["id"] for test in group["tests"]}
             unknown_ids = [test["id"] for test in override.get("tests", []) if test["id"] not in test_ids]
             if unknown_ids:
