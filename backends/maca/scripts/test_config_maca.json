@@ -6,6 +6,9 @@
         "LLAMA3_INPUT_BIN": "/nfs/InfiniTrain-dev/data/llmc/llama3/tinyshakespeare/tiny_shakespeare_train.bin",
         "LLAMA3_LLMC_FILEPATH": "/nfs/InfiniTrain-dev/data/llmc/llama3/llama3.2_1B_fp32.bin",
         "LLAMA3_LORA_WEIGHTS_DIR": "/nfs/InfiniTrain-dev/data/llmc/llama3/llama3.2_1B_lora_weights_rank8_alpha16.bin",
+        "QWEN3_INPUT_BIN": "/nfs/InfiniTrain-dev/data/llmc/qwen3/tinyshakespeare/tiny_shakespeare_train.bin",
+        "QWEN3_LLMC_FILEPATH": "/nfs/InfiniTrain-dev/data/llmc/qwen3/qwen3-8b-fp32.llmc",
+        "QWEN3_LORA_WEIGHTS_DIR": "/nfs/InfiniTrain-dev/data/llmc/qwen3/qwen3_8b_lora_weights_rank8_alpha16.bin",
         "GPT2_LORA_WEIGHTS_DIR": "/nfs/InfiniTrain-dev/data/llmc/gpt2/gpt2_124M_lora_weights_rank8_alpha16.bin",
         "MIXTRAL_INPUT_BIN": "/nfs/InfiniTrain-dev/data/llmc/llama3/tinyshakespeare/tiny_shakespeare_train.bin",
         "MIXTRAL_LLMC_FILEPATH": "/nfs/InfiniTrain-dev/data/llmc/mixtral/mixtral_megatron_export.bin",
@@ -56,15 +59,6 @@
                     }
                 }
             ]
-        },
-        {
-            "tag": "zero"
-        },
-        {
-            "tag": "lora"
-        },
-        {
-            "tag": "moe"
         },
         {
             "tag": "8_proc",

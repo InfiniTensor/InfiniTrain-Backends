@@ -39,7 +39,8 @@ set(OpenMP_CXX_FLAGS "-fopenmp")
 set(OpenMP_CXX_LIB_NAMES "mxomp")
 set(OpenMP_mxomp_LIBRARY "${_MACA_OPENMP_LIBRARY}")
 
-# mxcc cannot reliably run the feature probes used by glog and FindThreads.
+# mxcc cannot reliably run the feature probes used by glog and FindThreads;
+# in particular, glog's PIE probes use -fPIE, which mxcc does not support.
 # Keep these as directory variables: the InfiniTrain subtree inherits them,
 # while an embedding project's cache and sibling directories remain untouched.
 # Force FindThreads to select libpthread; claiming libc support clears its link interface.
@@ -49,7 +50,9 @@ set(CMAKE_HAVE_PTHREAD_CREATE ON)
 set(HAVE_SYS_TYPES_H 1)
 set(HAVE_UNISTD_H 1)
 set(HAVE_DLFCN_H 1)
+set(HAVE_ELF_H 1)
 set(HAVE_GLOB_H 1)
+set(HAVE_LINK_H 1)
 set(HAVE_PWD_H 1)
 set(HAVE_SYS_TIME_H 1)
 set(HAVE_SYS_UTSNAME_H 1)
