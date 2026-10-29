@@ -38,8 +38,7 @@ public:
                    Stream *stream) const override;
 
     void ReduceScatter(const void *sendbuff, void *recvbuff, size_t recv_count, DataType dtype,
-                       nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm,
-                       Stream *stream) const override;
+                       nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm, Stream *stream) const override;
 
     void Send(const void *buff, size_t count, DataType dtype, int peer, const CclComm *comm,
               Stream *stream) const override;

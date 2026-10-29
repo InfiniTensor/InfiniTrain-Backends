@@ -170,8 +170,7 @@ void McclImpl::Broadcast(const void *sendbuff, void *recvbuff, size_t count, Dat
 }
 
 void McclImpl::Reduce(const void *sendbuff, void *recvbuff, size_t count, DataType dtype,
-                      nn::parallel::comm::ReduceOpType reduce_op, int root, const CclComm *comm,
-                      Stream *stream) const {
+                      nn::parallel::comm::ReduceOpType reduce_op, int root, const CclComm *comm, Stream *stream) const {
     MCCL_CHECK(mcclReduce(sendbuff, recvbuff, count, kMcclDtypeMap.at(dtype), kMcclReduceOpMap.at(reduce_op), root,
                           GetMcclComm(comm), GetMacaStream(stream)));
 }
@@ -183,8 +182,7 @@ void McclImpl::AllGather(const void *sendbuff, void *recvbuff, size_t count, Dat
 }
 
 void McclImpl::ReduceScatter(const void *sendbuff, void *recvbuff, size_t recv_count, DataType dtype,
-                             nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm,
-                             Stream *stream) const {
+                             nn::parallel::comm::ReduceOpType reduce_op, const CclComm *comm, Stream *stream) const {
     MCCL_CHECK(mcclReduceScatter(sendbuff, recvbuff, recv_count, kMcclDtypeMap.at(dtype),
                                  kMcclReduceOpMap.at(reduce_op), GetMcclComm(comm), GetMacaStream(stream)));
 }
