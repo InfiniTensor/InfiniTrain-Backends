@@ -16,12 +16,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install Python dependencies
+    - name: Install formatters
       run: |
         python3 -m pip install --upgrade pip
-        pip install black
+        python3 -m pip install black clang-format==16.0.6
 
     - name: Run format check
       run: |
-        python3 scripts/format.py --path backends --check
+        python3 scripts/format.py --c clang-format --path backends --check
 

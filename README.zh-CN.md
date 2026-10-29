@@ -99,6 +99,11 @@ add_subdirectory(third_party/InfiniTrain-Backends)
 
 CMake 无法在启用某种语言后更换其编译器。
 
+## 开发检查
+
+clang-format、clang-tidy 和 IWYU 的范围、依赖及手动使用方式见
+[代码格式和静态检查](scripts/README.md)。
+
 ## 许可证
 
 InfiniTrain Backends 使用 [MIT 许可证](LICENSE)。
