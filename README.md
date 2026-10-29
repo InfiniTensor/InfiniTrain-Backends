@@ -109,6 +109,11 @@ add_subdirectory(third_party/InfiniTrain-Backends)
 
 CMake cannot replace a compiler after a language has been enabled.
 
+## Development checks
+
+See [formatting and static checks](scripts/README.md) for clang-format,
+clang-tidy and IWYU setup, scope and manual usage (in Chinese).
+
 ## License
 
 InfiniTrain Backends is released under the [MIT License](LICENSE).

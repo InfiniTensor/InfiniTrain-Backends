@@ -1,14 +1,22 @@
-import argparse
-import subprocess
-import os
-from pathlib import Path
-from colorama import Fore, Style
+#!/usr/bin/env python3
+"""Format complete files selected by path, staged changes or a Git reference."""
 
-# Supported file types
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from lint_common import ROOT, changed_paths, is_owned_path, root_path
+
+# Supported file types.
 SUPPORTED_FILES = {
     ".h": "c",
     ".hh": "c",
     ".hpp": "c",
+    ".hxx": "c",
     ".c": "c",
     ".cc": "c",
     ".cpp": "c",
@@ -23,185 +31,112 @@ SUPPORTED_FILES = {
 
 
 def format_file(file: Path, check: bool, formatter) -> bool:
-    formatter = formatter.get(SUPPORTED_FILES.get(file.suffix, None), None)
-    if not formatter:
-        return True  # File type not supported, skip
-
+    kind = SUPPORTED_FILES.get(file.suffix.lower())
+    if kind is None:
+        return True
+    binary = formatter[kind]
+    command = [binary]
+    if kind == "c":
+        command += ["-style=file"]
+        command += ["--dry-run", "--Werror"] if check else ["-i"]
+    elif check:
+        command += ["--check"]
+    command.append(str(file))
     try:
-        cmd = []
-        if formatter.startswith("clang-format"):
-            cmd = [formatter, "-style=file", "-i", file]
-            if check:
-                cmd.insert(2, "-dry-run")
-                process = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                if process.stderr:
-                    print(f"{Fore.YELLOW}{file} is not formatted.{Style.RESET_ALL}")
-                    print(
-                        f"Use {Fore.CYAN}{formatter} -style=file -i {file}{Style.RESET_ALL} to format it."
-                    )
-                    return False
-            else:
-                subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                print(f"{Fore.CYAN}Formatted: {file}{Style.RESET_ALL}")
-        elif formatter == "black":
-            cmd = [formatter, file]
-            if check:
-                cmd.insert(1, "--check")
-                process = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                if process.stderr:
-                    print(f"{Fore.YELLOW}{file} is not formatted.{Style.RESET_ALL}")
-                    print(
-                        f"Use {Fore.CYAN}{formatter} {file}{Style.RESET_ALL} to format it."
-                    )
-                    return False
-            else:
-                subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                print(f"{Fore.CYAN}Formatted: {file}{Style.RESET_ALL}")
-    except FileNotFoundError:
-        print(
-            f"{Fore.RED}Formatter {formatter} not found.{Style.RESET_ALL}"
+        process = subprocess.run(
+            command, cwd=ROOT, capture_output=True, text=True, check=False
         )
+    except OSError as error:
+        print(f"error: cannot run {binary}: {error}", file=sys.stderr)
         return False
-    except subprocess.CalledProcessError as e:
-        print(f"{Fore.RED}Formatter {formatter} failed: {e}{Style.RESET_ALL}")
-
+    if process.returncode != 0:
+        print(f"error: {binary} failed for {file}", file=sys.stderr)
+        print(process.stdout + process.stderr, file=sys.stderr, end="")
+        return False
+    if not check:
+        print(f"Formatted: {file.relative_to(ROOT)}")
     return True
 
 
 def git_added_files():
-    """Get all files with staged changes"""
-    try:
-        # Use git diff --cached --name-only to get all files added to the staging area
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--diff-filter=AMR", "--name-only"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        for file in result.stdout.splitlines():
-            yield Path(file.strip())
-    except subprocess.CalledProcessError as e:
-        print(f"{Fore.RED}Git diff failed: {e}{Style.RESET_ALL}")
+    """Get files selected by staged changes, using repository-relative Git paths."""
+    for file in changed_paths(None):
+        yield root_path(file)
 
 
 def git_modified_since_ref(ref):
-    """Get a list of modified files from the specified Git reference to the current state"""
-    try:
-        result = subprocess.run(
-            ["git", "diff", f"{ref}..", "--diff-filter=AMR", "--name-only"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        for file in result.stdout.splitlines():
-            yield Path(file.strip())
-    except subprocess.CalledProcessError as e:
-        print(f"{Fore.RED}Git diff failed: {e}{Style.RESET_ALL}")
+    """Get files changed from the merge-base of ref to HEAD."""
+    for file in changed_paths(ref):
+        yield root_path(file)
 
 
 def list_files(paths):
-    """Recursively get all files under the specified path"""
-    files = []
+    """Recursively get repository files under the specified paths."""
     for path in paths:
+        if not is_owned_path(path):
+            continue
         if path.is_file():
             yield path
         elif path.is_dir():
-            for dirpath, _, filenames in os.walk(path):
+            for dirpath, subdirectories, filenames in os.walk(path):
+                subdirectories[:] = [
+                    name
+                    for name in subdirectories
+                    if is_owned_path(Path(dirpath) / name)
+                ]
                 for name in filenames:
-                    yield Path(dirpath) / name
+                    file = Path(dirpath) / name
+                    if is_owned_path(file):
+                        yield file
         else:
-            print(
-                f"{Fore.RED}Error: {path} is not a file or directory.{Style.RESET_ALL}"
-            )
+            raise ValueError(f"not a file or directory: {path}")
 
 
-def filter_in_path(file: Path, path) -> bool:
-    """Determine whether the file is in the specified path"""
-    for p in path:
-        if file.is_relative_to(p):
-            return True
-    return False
+def filter_in_path(file: Path, paths) -> bool:
+    """Determine whether the file is in one of the selected paths."""
+    return any(file.is_relative_to(path) for path in paths)
 
 
-def main():
-    parser = argparse.ArgumentParser()
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ref", help="compare with the merge-base of REF")
     parser.add_argument(
-        "--ref", type=str, help="Git reference (commit hash) to compare against."
+        "--path", nargs="*", type=Path, help="repository-relative paths"
     )
     parser.add_argument(
-        "--path", nargs="*", type=Path, help="Files to format or check."
+        "--check", action="store_true", help="check without modifying files"
     )
-    parser.add_argument(
-        "--check", action="store_true", help="Check files without modifying them."
-    )
-    parser.add_argument(
-        "--c", default="clang-format-16", help="C formatter (default: clang-format-16)"
-    )
-    parser.add_argument(
-        "--py", default="black", help="Python formatter (default: black)"
-    )
+    parser.add_argument("--c", default="clang-format-16", help="C/C++ formatter binary")
+    parser.add_argument("--py", default="black", help="Python formatter binary")
     args = parser.parse_args()
 
-    if args.ref is None and args.path is None:
-        # Last commit.
-        print(f"{Fore.GREEN}Formating git added files.{Style.RESET_ALL}")
-        files = git_added_files()
-
-    else:
-        if args.ref is None:
-            print(f"{Fore.GREEN}Formating files in {args.path}.{Style.RESET_ALL}")
+    try:
+        if args.path is not None:
+            args.path = [root_path(path) for path in args.path]
+        if args.ref is None and args.path is None:
+            files = git_added_files()
+        elif args.ref is None:
             files = list_files(args.path)
         elif args.path is None:
-            print(
-                f"{Fore.GREEN}Formating git modified files from {args.ref}.{Style.RESET_ALL}"
-            )
             files = git_modified_since_ref(args.ref)
         else:
-            print(
-                f"{Fore.GREEN}Formating git modified files from {args.ref} in {args.path}.{Style.RESET_ALL}"
-            )
             files = (
                 file
                 for file in git_modified_since_ref(args.ref)
                 if filter_in_path(file, args.path)
             )
 
-    formatted = True
-    for file in files:
-        if not format_file(
-            file,
-            args.check,
-            {
-                "c": args.c,
-                "py": args.py,
-            },
-        ):
-            formatted = False
-
-    if not formatted:
-        exit(1)
+        formatted = True
+        for file in files:
+            if not is_owned_path(file) or not file.is_file():
+                continue
+            if not format_file(file, args.check, {"c": args.c, "py": args.py}):
+                formatted = False
+        return 0 if formatted else 1
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
-    main()
-
+    raise SystemExit(main())
