@@ -407,7 +407,19 @@ void MacaGuardImpl::MallocAsync(void **dev_ptr, size_t size, Stream *stream) {
         return;
     }
     auto maca_stream = GetMacaStream(stream);
-    MACA_CHECK(mcMallocAsync(dev_ptr, size, maca_stream));
+    const mcError_t status = mcMallocAsync(dev_ptr, size, maca_stream);
+    if (status == mcErrorMemoryAllocation) {
+        int device_index = -1;
+        size_t free_bytes = 0, total_bytes = 0;
+        const mcError_t device_status = mcGetDevice(&device_index);
+        const mcError_t memory_status = mcMemGetInfo(&free_bytes, &total_bytes);
+        LOG(ERROR) << "MACA async allocation failed: requested_bytes=" << size << " device=" << device_index
+                   << " free_bytes=" << free_bytes << " total_bytes=" << total_bytes
+                   << " retain_async_pool=" << (g_retain_async_pool ? "true" : "false")
+                   << " device_query=" << mcGetErrorString(device_status)
+                   << " memory_query=" << mcGetErrorString(memory_status);
+    }
+    MACA_CHECK(status);
 }
 
 void MacaGuardImpl::Free(void *dev_ptr) {
