@@ -45,7 +45,7 @@ python3 scripts/format.py --path backends tools scripts --check
 
 ## 后端编译数据库
 
-clang-tidy 和 IWYU 需要仓库根目录生成的 `compile_commands.json`。
+clang-tidy 和 IWYU 需要从仓库根目录配置 CMake，并在构建目录导出 `compile_commands.json`。
 仅在 InfiniTrain 子目录开启导出时，数据库可能只有子模块条目，无法检查后端。
 MACA 示例配置如下，其他构建依赖按 [MACA 指南](../backends/maca/README.zh-CN.md) 准备：
 
@@ -59,7 +59,8 @@ cmake -S . -B build/lint -G Ninja \
 ```
 
 这里使用后端的真实编译器及 SDK。不要沿用上游 CPU CI 的纯 clang 配置来
-代替后端配置。保留独立的 `build/lint` 目录，避免与模型运行脚本清理的构建目录混用。
+代替后端配置。手动构建使用 `build`，自动模型测试使用 `build/maca`；
+静态检查使用独立的 `build/lint`，模型运行脚本只清理自己的 `build/maca` 目录。
 多个后端需分别配置和检查；`--all` 只覆盖当前数据库中存在的宿主编译单元。
 
 运行检查脚本时，会在 `BUILD_DIR/clang-tidy-host` 或 `BUILD_DIR/iwyu-host`

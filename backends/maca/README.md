@@ -16,6 +16,7 @@ In addition to the [common requirements](../../README.md#common-requirements):
 - A compatible **MACA SDK** with a C++20-capable `mxgpu_llvm/bin/mxcc` compiler,
   the MACA runtime, MCDNN, MCBLAS, and the SDK's OpenMP runtime
 - **MCCL** when distributed collectives are enabled (enabled by default)
+- **GNU Make** for the quick-start build commands
 - Python 3 when using the automated model test runner (standard library only)
 
 ## 🚀 Quick Start
@@ -27,17 +28,16 @@ select the MACA SDK, and build in a dedicated directory:
 git submodule update --init --recursive
 export MACA_PATH=/opt/maca
 
-cmake -S . -B build-maca \
-  -DINFINITRAIN_BACKEND=maca \
-  -DINFINITRAIN_MACA_WITH_MCCL=ON \
-  -DBUILD_TEST=ON
-cmake --build build-maca -j
+mkdir build
+cd build
+cmake .. -DINFINITRAIN_BACKEND=maca -DINFINITRAIN_MACA_WITH_MCCL=ON
+make -j
 ```
 
-The example executables are written to `build-maca`. From that directory:
+The example executables are written to the current `build` directory. To view
+their command-line options, run:
 
 ```bash
-cd build-maca
 ./gpt2 --help
 ./llama3 --help
 ./mixtral --help
@@ -84,6 +84,8 @@ customize settings; groups and tests omitted there are inherited as well.
 Before running it, update the dataset and checkpoint paths in the overrides.
 The wrapper uses Python's standard library for JSON handling, including the
 upstream runner's configuration queries, so `jq` is not required.
+The runner uses `build/maca` by default and clears that directory before each
+rebuild and after the run.
 
 Run all configured model tests from the repository root in a separate shell
 with the MACA SDK environment configured:
@@ -97,12 +99,12 @@ configuration. To run just the basic group, add `--only-run basic`.
 
 ## Unit Tests
 
-The quick start builds the unit tests with `BUILD_TEST=ON`. To enable and build
-them in an existing MACA build directory, run:
+Unit tests are disabled by default. From the `build` directory created in the
+quick start, enable and build them with:
 
 ```bash
 cmake .. -DBUILD_TEST=ON
-cmake --build . -j
+make -j
 ctest -L maca --output-on-failure
 ```
 
