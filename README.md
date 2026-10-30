@@ -27,6 +27,7 @@ process may register at most one provider for `DeviceType::kPrivateUse1`.
 | Backend | Runtime | Collectives | Model examples |
 | ------- | ------- | ----------- | -------------- |
 | [MACA](backends/maca/README.md) | MACA | MCCL (optional) | GPT-2, LLaMA 3, Mixtral |
+| [MLU](backends/mlu/README.md) (work in progress) | CNRT | — | GPT-2 |
 
 The model sources normally come from the pinned InfiniTrain submodule. Each
 backend supplies the runtime, kernels, collective implementation, and build
@@ -113,6 +114,23 @@ CMake cannot replace a compiler after a language has been enabled.
 
 See [formatting and static checks](scripts/README.md) for clang-format,
 clang-tidy and IWYU setup, scope and manual usage (in Chinese).
+
+## Cambricon MLU provider (work in progress)
+
+`backends/mlu` registers a `PrivateUse1` backend named `mlu` for Cambricon MLU
+devices. Small-shape FP32 operators and the device math functions are covered by
+regression tools; device GEMM, full GPT-2 10-step accuracy, BF16 and multi-card
+collectives are **not** done yet.
+
+```bash
+cmake -S . -B build-mlu -G Ninja \
+  -DINFINITRAIN_BACKEND=mlu -DUSE_CUDA=OFF -DBUILD_TEST=OFF
+cmake --build build-mlu --target mlu_gpt2 mlu_op_test -j
+```
+
+See [the MLU provider guide](backends/mlu/README.md) for the SDK requirements and
+[its validation status](backends/mlu/docs/validation.md) for what has actually
+been run.
 
 ## License
 

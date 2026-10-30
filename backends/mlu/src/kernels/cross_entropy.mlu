@@ -1,0 +1,130 @@
+// 纯 BANG C kernel + 启动器（cncc 编译，只允许 C++11 级别语法，不含框架头）。
+// 框架集成见同目录 cross_entropy.cc。
+// 语义对应上游 src/kernels/cuda/cross_entropy.cu：max/sum 归约全程 FP32。
+// 简化策略（正确性优先）：一个样本一个核，串行归约，顺序确定。
+// 注意：CUDA 版前向的批均值是在 host 侧 FP64 累加的（见其 FIXME 注释），
+// 本 kernel 只产出每样本 loss，批均值同样在 host 侧做（见 cross_entropy.cc）。
+
+#include <stdint.h>
+
+#include <bang.h>
+
+#include "kernels/mlu_kernel_api.h"
+
+namespace {
+using infini_train::kernels::mlu::MluScalarType;
+
+constexpr uint32_t kDefaultTaskCount = 4;
+
+// 注意（实测）：本工具链下 taskIdX/coreId/taskDimX/coreDim 与预期语义不符，配合
+// cnrtFuncTypeUnion1 时循环写 GDRAM 只有首尾元素落盘。厂商示例（samples/BANG/.../
+// vectoradd/0_scalarAdd_single_core）用的是纯串行循环 + cnrtFuncTypeBlock。
+// 因此所有 kernel 统一改为单任务串行；性能优化属任务三，届时再按官方多核范式改写。
+
+template <typename Ttarget, typename Tinput>
+__mlu_global__ void CrossEntropyForwardKernel(const Tinput *input, const Ttarget *target, Tinput *loss, int64_t bs,
+                                              int64_t num_classes) {
+    for (int64_t sample = 0; sample < bs; ++sample) {
+        const Tinput *row = input + sample * num_classes;
+
+        float max_logit = -__builtin_inff();
+        for (int64_t i = 0; i < num_classes; ++i) {
+            const float v = static_cast<float>(row[i]);
+            max_logit = v > max_logit ? v : max_logit;
+        }
+        float sum_exp = 0.0f;
+        for (int64_t i = 0; i < num_classes; ++i) { sum_exp += expf(static_cast<float>(row[i]) - max_logit); }
+
+        const int64_t target_class = static_cast<int64_t>(target[sample]);
+        const float target_val = static_cast<float>(row[target_class]) - max_logit;
+        loss[sample] = static_cast<Tinput>(logf(sum_exp) - target_val);
+    }
+}
+
+template <typename Ttarget, typename Tinput>
+__mlu_global__ void CrossEntropyBackwardKernel(const Tinput *input, Tinput *grad_input, const Ttarget *target,
+                                               const Tinput *grad_output, int64_t bs, int64_t num_classes) {
+    const float inv_bs = 1.0f / bs;
+    const float grad_scale = static_cast<float>(grad_output[0]);
+    for (int64_t sample = 0; sample < bs; ++sample) {
+        const Tinput *row = input + sample * num_classes;
+        Tinput *grad_row = grad_input + sample * num_classes;
+
+        float max_logit = -__builtin_inff();
+        for (int64_t i = 0; i < num_classes; ++i) {
+            const float v = static_cast<float>(row[i]);
+            max_logit = v > max_logit ? v : max_logit;
+        }
+        float sum_exp = 0.0f;
+        for (int64_t i = 0; i < num_classes; ++i) { sum_exp += expf(static_cast<float>(row[i]) - max_logit); }
+
+        const int64_t target_class = static_cast<int64_t>(target[sample]);
+        const float scale = 1.0f / sum_exp;
+        for (int64_t i = 0; i < num_classes; ++i) {
+            const float exp_val = expf(static_cast<float>(row[i]) - max_logit);
+            grad_row[i]
+                = static_cast<Tinput>((exp_val * scale - (i == target_class ? 1.0f : 0.0f)) * inv_bs * grad_scale);
+        }
+    }
+}
+
+template <typename Ttarget, typename Tinput>
+void CrossEntropyForwardTyped(const void *input, const void *target, void *loss, int64_t bs, int64_t num_classes,
+                              cnrtQueue_t queue) {
+    const cnrtDim3_t dim = {1, 1, 1};
+    CrossEntropyForwardKernel<Ttarget, Tinput>
+        <<<dim, cnrtFuncTypeBlock, queue>>>(static_cast<const Tinput *>(input), static_cast<const Ttarget *>(target),
+                                            static_cast<Tinput *>(loss), bs, num_classes);
+}
+
+template <typename Ttarget, typename Tinput>
+void CrossEntropyBackwardTyped(const void *input, void *grad_input, const void *target, const void *grad_output,
+                               int64_t bs, int64_t num_classes, cnrtQueue_t queue) {
+    const cnrtDim3_t dim = {1, 1, 1};
+    CrossEntropyBackwardKernel<Ttarget, Tinput><<<dim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<const Tinput *>(input), static_cast<Tinput *>(grad_input), static_cast<const Ttarget *>(target),
+        static_cast<const Tinput *>(grad_output), bs, num_classes);
+}
+
+#define MLU_CE_INPUT_SWITCH(fn, Ttarget, ...)                                                                          \
+    switch (input_type) {                                                                                              \
+    case MluScalarType::kF16:                                                                                          \
+        fn<Ttarget, half>(__VA_ARGS__);                                                                                \
+        return;                                                                                                        \
+    case MluScalarType::kBF16:                                                                                         \
+        fn<Ttarget, bfloat16_t>(__VA_ARGS__);                                                                          \
+        return;                                                                                                        \
+    case MluScalarType::kF32:                                                                                          \
+        fn<Ttarget, float>(__VA_ARGS__);                                                                               \
+        return;                                                                                                        \
+    default:                                                                                                           \
+        return;                                                                                                        \
+    }
+
+#define MLU_CE_TARGET_SWITCH(fn, ...)                                                                                  \
+    switch (target_type) {                                                                                             \
+    case MluScalarType::kU8:                                                                                           \
+        MLU_CE_INPUT_SWITCH(fn, uint8_t, __VA_ARGS__);                                                                 \
+        return;                                                                                                        \
+    case MluScalarType::kI64:                                                                                          \
+        MLU_CE_INPUT_SWITCH(fn, int64_t, __VA_ARGS__);                                                                 \
+        return;                                                                                                        \
+    default:                                                                                                           \
+        return;                                                                                                        \
+    }
+} // namespace
+
+namespace infini_train::kernels::mlu {
+
+void CrossEntropyForwardLaunch(const void *input, const void *target, void *loss, int64_t bs, int64_t num_classes,
+                               MluScalarType target_type, MluScalarType input_type, cnrtQueue_t queue) {
+    MLU_CE_TARGET_SWITCH(CrossEntropyForwardTyped, input, target, loss, bs, num_classes, queue)
+}
+
+void CrossEntropyBackwardLaunch(const void *input, void *grad_input, const void *target, const void *grad_output,
+                                int64_t bs, int64_t num_classes, MluScalarType target_type, MluScalarType input_type,
+                                cnrtQueue_t queue) {
+    MLU_CE_TARGET_SWITCH(CrossEntropyBackwardTyped, input, grad_input, target, grad_output, bs, num_classes, queue)
+}
+
+} // namespace infini_train::kernels::mlu

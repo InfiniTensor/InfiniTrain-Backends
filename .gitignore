@@ -7,3 +7,11 @@
 *.log
 *.report.rank*
 *.records.log.rank*
+
+# MLU provider local artifacts
+*.cndump
+core
+core.*
+__pycache__/
+/backends/mlu/tests/math_selftest/math_selftest
+/backends/mlu/tests/math_selftest/*.o

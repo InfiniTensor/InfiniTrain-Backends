@@ -1,0 +1,93 @@
+// 纯 BANG C kernel + 启动器（cncc 编译，只允许 C++11 级别语法，不含框架头）。
+// 框架集成见同目录 accumulate_grad.cc。
+// 语义对应上游 src/kernels/cuda/accumulate_grad.cu；16 位浮点一律经 float
+// 中转计算（FP32 中间精度），与框架"归约/累加用 FP32"的约定一致。
+
+#include <stdint.h>
+
+#include <bang.h>
+
+#include "kernels/mlu_kernel_api.h"
+
+namespace {
+constexpr uint32_t kDefaultTaskCount = 4;
+
+template <typename T>
+__mlu_global__ void AccumulateGradKernel(const T *grad_ptr, float rate, T *tensor_ptr, int64_t num_elements) {
+
+    for (int64_t idx = 0; idx < num_elements; ++idx) {
+        tensor_ptr[idx]
+            = static_cast<T>(static_cast<float>(tensor_ptr[idx]) + static_cast<float>(grad_ptr[idx]) * rate);
+    }
+}
+
+template <typename T>
+__mlu_global__ void AdamAccumulateGradKernel(const T *grad_data, T *param_data, int64_t num_elements, T *m_data,
+                                             T *v_data, float learning_rate, float beta1, float beta2, float eps,
+                                             float bias_correction_m, float bias_correction_v) {
+
+    for (int64_t idx = 0; idx < num_elements; ++idx) {
+        const float g = static_cast<float>(grad_data[idx]);
+        const float m = beta1 * static_cast<float>(m_data[idx]) + (1.0f - beta1) * g;
+        const float v = beta2 * static_cast<float>(v_data[idx]) + (1.0f - beta2) * g * g;
+        m_data[idx] = static_cast<T>(m);
+        v_data[idx] = static_cast<T>(v);
+
+        const float m_hat = m / bias_correction_m;
+        const float v_hat = v / bias_correction_v;
+        // CUDA 版用 __frcp_rn(__fsqrt_rn(v) + eps)（单精度倒数）；这里 1.0f/(sqrtf+eps)
+        // 同为 IEEE 单精度除法，对 FP32 场景逐位一致
+        param_data[idx]
+            = static_cast<T>(static_cast<float>(param_data[idx]) - learning_rate * m_hat / (sqrtf(v_hat) + eps));
+    }
+}
+
+template <typename T>
+void AccumulateGradTyped(const void *grad, float rate, void *tensor, int64_t num_elements, cnrtQueue_t queue) {
+    const cnrtDim3_t dim = {1, 1, 1};
+    AccumulateGradKernel<T>
+        <<<dim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(grad), rate, static_cast<T *>(tensor), num_elements);
+}
+
+template <typename T>
+void AdamAccumulateGradTyped(const void *grad, void *param, void *m, void *v, float learning_rate, float beta1,
+                             float beta2, float eps, float bias_correction_m, float bias_correction_v,
+                             int64_t num_elements, cnrtQueue_t queue) {
+    const cnrtDim3_t dim = {1, 1, 1};
+    AdamAccumulateGradKernel<T><<<dim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<const T *>(grad), static_cast<T *>(param), num_elements, static_cast<T *>(m), static_cast<T *>(v),
+        learning_rate, beta1, beta2, eps, bias_correction_m, bias_correction_v);
+}
+
+#define MLU_ACCUM_GRAD_FLOAT_SWITCH(launch_fn, ...)                                                                    \
+    switch (type) {                                                                                                    \
+    case MluScalarType::kF16:                                                                                          \
+        launch_fn<half>(__VA_ARGS__);                                                                                  \
+        return;                                                                                                        \
+    case MluScalarType::kBF16:                                                                                         \
+        launch_fn<bfloat16_t>(__VA_ARGS__);                                                                            \
+        return;                                                                                                        \
+    case MluScalarType::kF32:                                                                                          \
+        launch_fn<float>(__VA_ARGS__);                                                                                 \
+        return;                                                                                                        \
+    default:                                                                                                           \
+        /* 只 dispatch 浮点类型；FP64 已由 host 侧排除 */                                                   \
+        return;                                                                                                        \
+    }
+} // namespace
+
+namespace infini_train::kernels::mlu {
+
+void AccumulateGradLaunch(const void *grad, float rate, void *tensor, MluScalarType type, int64_t num_elements,
+                          cnrtQueue_t queue) {
+    MLU_ACCUM_GRAD_FLOAT_SWITCH(AccumulateGradTyped, grad, rate, tensor, num_elements, queue)
+}
+
+void AdamAccumulateGradLaunch(const void *grad, void *param, void *m, void *v, float learning_rate, float beta1,
+                              float beta2, float eps, float bias_correction_m, float bias_correction_v,
+                              MluScalarType type, int64_t num_elements, cnrtQueue_t queue) {
+    MLU_ACCUM_GRAD_FLOAT_SWITCH(AdamAccumulateGradTyped, grad, param, m, v, learning_rate, beta1, beta2, eps,
+                                bias_correction_m, bias_correction_v, num_elements, queue)
+}
+
+} // namespace infini_train::kernels::mlu

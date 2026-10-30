@@ -1,0 +1,246 @@
+// 纯 BANG C kernel + 启动器（cncc 编译，只允许 C++11 级别语法，不含框架头）。
+// 框架集成见同目录 transform.cc。
+// 语义对应上游 src/kernels/cuda/transform.cu 与 slice.cu。
+// 与 CUDA 版的差异：维度/步长元数据以 POD（MluIndexMeta）按值传入 kernel
+// 参数空间，不再需要 cudaMallocAsync + H2D 上传。
+
+#include <stdint.h>
+
+#include <bang.h>
+
+#include "kernels/mlu_kernel_api.h"
+
+namespace {
+using infini_train::kernels::mlu::MluIndexMeta;
+using infini_train::kernels::mlu::MluScalarType;
+
+constexpr uint32_t kDefaultTaskCount = 4;
+
+// 注意（实测）：本工具链下 taskIdX/coreId/taskDimX/coreDim 与预期语义不符，配合
+// cnrtFuncTypeUnion1 时循环写 GDRAM 只有首尾元素落盘。厂商示例（samples/BANG/.../
+// vectoradd/0_scalarAdd_single_core）用的是纯串行循环 + cnrtFuncTypeBlock。
+// 因此所有 kernel 统一改为单任务串行；性能优化属任务三，届时再按官方多核范式改写。
+
+// ----------------------------- Tril / Triu -----------------------------
+// 前向反向同形：满足条件保留原值，否则置 0
+
+template <typename T, bool kTriu>
+__mlu_global__ void TrilTriuKernel(const T *input, T *output, int64_t rows, int64_t cols, int64_t diagonal) {
+    const int64_t n = rows * cols;
+    for (int64_t idx = 0; idx < n; ++idx) {
+        const int64_t row = idx / cols;
+        const int64_t col = idx % cols;
+        const bool keep = kTriu ? (row - col + diagonal <= 0) : (row - col + diagonal >= 0);
+        output[idx] = keep ? input[idx] : static_cast<T>(0);
+    }
+}
+
+// ----------------------------- Transpose -----------------------------
+
+template <typename T>
+__mlu_global__ void TransposeKernel(const T *input, T *output, MluIndexMeta meta, int64_t dim0, int64_t dim1,
+                                    int64_t num_elements) {
+    for (int64_t idx = 0; idx < num_elements; ++idx) {
+        int64_t remaining = idx;
+        int64_t coords[MLU_MAX_META_DIMS];
+        for (int i = 0; i < meta.ndim; ++i) {
+            coords[i] = remaining / meta.out_strides[i];
+            remaining %= meta.out_strides[i];
+        }
+        const int64_t tmp = coords[dim0];
+        coords[dim0] = coords[dim1];
+        coords[dim1] = tmp;
+        int64_t in_flat = 0;
+        for (int i = 0; i < meta.ndim; ++i) { in_flat += coords[i] * meta.in_strides[i]; }
+        output[idx] = input[in_flat];
+    }
+}
+
+// ----------------------------- Slice -----------------------------
+
+template <typename T>
+__mlu_global__ void SliceForwardKernel(const T *input, T *output, MluIndexMeta meta, int64_t num_elements) {
+    for (int64_t out_idx = 0; out_idx < num_elements; ++out_idx) {
+        int64_t in_index = 0;
+        for (int i = 0; i < meta.ndim; ++i) {
+            const int64_t idx = (out_idx / meta.out_strides[i]) % meta.dims[i];
+            in_index += (meta.starts[i] + idx * meta.steps[i]) * meta.in_strides[i];
+        }
+        output[out_idx] = input[in_index];
+    }
+}
+
+// grad_input 调用前必须已清零
+template <typename T>
+__mlu_global__ void SliceBackwardKernel(const T *grad_output, T *grad_input, MluIndexMeta meta, int64_t num_elements) {
+    for (int64_t out_idx = 0; out_idx < num_elements; ++out_idx) {
+        int64_t in_index = 0;
+        for (int i = 0; i < meta.ndim; ++i) {
+            const int64_t idx = (out_idx / meta.out_strides[i]) % meta.dims[i];
+            in_index += (meta.starts[i] + idx * meta.steps[i]) * meta.in_strides[i];
+        }
+        grad_input[in_index] = grad_output[out_idx];
+    }
+}
+
+// ----------------------------- Mask（MaskedFill） -----------------------------
+// kTail: mask[i % mask_size]；kLead: mask[i / inner]
+// mask 在 host 侧已 Cast 成与 input 相同 dtype，按 == 1 判定（与 CUDA 版一致）
+
+template <typename T, bool kLead>
+__mlu_global__ void MaskForwardKernel(const T *input, const T *mask, T *output, T value, int64_t mask_extent,
+                                      int64_t inner, int64_t num_elements) {
+    for (int64_t i = 0; i < num_elements; ++i) {
+        const int64_t mask_idx = kLead ? (i / inner) : (i % mask_extent);
+        output[i] = (mask[mask_idx] == static_cast<T>(1)) ? value : input[i];
+    }
+}
+
+template <typename T, bool kLead>
+__mlu_global__ void MaskBackwardKernel(const T *grad_output, const T *mask, T *grad_input, int64_t mask_extent,
+                                       int64_t inner, int64_t num_elements) {
+    for (int64_t i = 0; i < num_elements; ++i) {
+        const int64_t mask_idx = kLead ? (i / inner) : (i % mask_extent);
+        grad_input[i] = (mask[mask_idx] == static_cast<T>(1)) ? static_cast<T>(0) : grad_output[i];
+    }
+}
+
+// ----------------------------- 启动器 -----------------------------
+
+const cnrtDim3_t kDim = {1, 1, 1};
+
+template <typename T>
+void TrilTriuTyped(const void *input, void *output, int64_t rows, int64_t cols, int64_t diagonal, bool upper,
+                   cnrtQueue_t queue) {
+    if (upper) {
+        TrilTriuKernel<T, true><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(input),
+                                                                    static_cast<T *>(output), rows, cols, diagonal);
+    } else {
+        TrilTriuKernel<T, false><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(input),
+                                                                     static_cast<T *>(output), rows, cols, diagonal);
+    }
+}
+
+template <typename T>
+void TransposeTyped(const void *input, void *output, MluIndexMeta meta, int64_t dim0, int64_t dim1,
+                    int64_t num_elements, cnrtQueue_t queue) {
+    TransposeKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(input), static_cast<T *>(output),
+                                                           meta, dim0, dim1, num_elements);
+}
+
+template <typename T>
+void SliceForwardTyped(const void *input, void *output, MluIndexMeta meta, int64_t num_elements, cnrtQueue_t queue) {
+    SliceForwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(input), static_cast<T *>(output),
+                                                              meta, num_elements);
+}
+
+template <typename T>
+void SliceBackwardTyped(const void *grad_output, void *grad_input, MluIndexMeta meta, int64_t num_elements,
+                        cnrtQueue_t queue) {
+    SliceBackwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(grad_output),
+                                                               static_cast<T *>(grad_input), meta, num_elements);
+}
+
+template <typename T>
+void MaskForwardTyped(const void *input, const void *mask, void *output, float value, bool lead, int64_t mask_extent,
+                      int64_t inner, int64_t num_elements, cnrtQueue_t queue) {
+    const T v = static_cast<T>(value);
+    if (lead) {
+        MaskForwardKernel<T, true>
+            <<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(input), static_cast<const T *>(mask),
+                                                 static_cast<T *>(output), v, mask_extent, inner, num_elements);
+    } else {
+        MaskForwardKernel<T, false>
+            <<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(input), static_cast<const T *>(mask),
+                                                 static_cast<T *>(output), v, mask_extent, inner, num_elements);
+    }
+}
+
+template <typename T>
+void MaskBackwardTyped(const void *grad_output, const void *mask, void *grad_input, bool lead, int64_t mask_extent,
+                       int64_t inner, int64_t num_elements, cnrtQueue_t queue) {
+    if (lead) {
+        MaskBackwardKernel<T, true>
+            <<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(grad_output), static_cast<const T *>(mask),
+                                                 static_cast<T *>(grad_input), mask_extent, inner, num_elements);
+    } else {
+        MaskBackwardKernel<T, false>
+            <<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<const T *>(grad_output), static_cast<const T *>(mask),
+                                                 static_cast<T *>(grad_input), mask_extent, inner, num_elements);
+    }
+}
+
+#define MLU_TF_NUMERIC_SWITCH(fn, ...)                                                                                 \
+    switch (type) {                                                                                                    \
+    case MluScalarType::kU8:                                                                                           \
+        fn<uint8_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kI8:                                                                                           \
+        fn<int8_t>(__VA_ARGS__);                                                                                       \
+        return;                                                                                                        \
+    case MluScalarType::kU16:                                                                                          \
+        fn<uint16_t>(__VA_ARGS__);                                                                                     \
+        return;                                                                                                        \
+    case MluScalarType::kI16:                                                                                          \
+        fn<int16_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kU32:                                                                                          \
+        fn<uint32_t>(__VA_ARGS__);                                                                                     \
+        return;                                                                                                        \
+    case MluScalarType::kI32:                                                                                          \
+        fn<int32_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kU64:                                                                                          \
+        fn<uint64_t>(__VA_ARGS__);                                                                                     \
+        return;                                                                                                        \
+    case MluScalarType::kI64:                                                                                          \
+        fn<int64_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kF16:                                                                                          \
+        fn<half>(__VA_ARGS__);                                                                                         \
+        return;                                                                                                        \
+    case MluScalarType::kBF16:                                                                                         \
+        fn<bfloat16_t>(__VA_ARGS__);                                                                                   \
+        return;                                                                                                        \
+    case MluScalarType::kF32:                                                                                          \
+        fn<float>(__VA_ARGS__);                                                                                        \
+        return;                                                                                                        \
+    default:                                                                                                           \
+        return;                                                                                                        \
+    }
+} // namespace
+
+namespace infini_train::kernels::mlu {
+
+void TrilTriuLaunch(const void *input, void *output, int64_t rows, int64_t cols, int64_t diagonal, bool upper,
+                    MluScalarType type, cnrtQueue_t queue) {
+    MLU_TF_NUMERIC_SWITCH(TrilTriuTyped, input, output, rows, cols, diagonal, upper, queue)
+}
+
+void TransposeLaunch(const void *input, void *output, MluIndexMeta meta, int64_t dim0, int64_t dim1,
+                     int64_t num_elements, MluScalarType type, cnrtQueue_t queue) {
+    MLU_TF_NUMERIC_SWITCH(TransposeTyped, input, output, meta, dim0, dim1, num_elements, queue)
+}
+
+void SliceForwardLaunch(const void *input, void *output, MluIndexMeta meta, int64_t num_elements, MluScalarType type,
+                        cnrtQueue_t queue) {
+    MLU_TF_NUMERIC_SWITCH(SliceForwardTyped, input, output, meta, num_elements, queue)
+}
+
+void SliceBackwardLaunch(const void *grad_output, void *grad_input, MluIndexMeta meta, int64_t num_elements,
+                         MluScalarType type, cnrtQueue_t queue) {
+    MLU_TF_NUMERIC_SWITCH(SliceBackwardTyped, grad_output, grad_input, meta, num_elements, queue)
+}
+
+void MaskForwardLaunch(const void *input, const void *mask, void *output, float value, bool lead, int64_t mask_extent,
+                       int64_t inner, int64_t num_elements, MluScalarType type, cnrtQueue_t queue) {
+    MLU_TF_NUMERIC_SWITCH(MaskForwardTyped, input, mask, output, value, lead, mask_extent, inner, num_elements, queue)
+}
+
+void MaskBackwardLaunch(const void *grad_output, const void *mask, void *grad_input, bool lead, int64_t mask_extent,
+                        int64_t inner, int64_t num_elements, MluScalarType type, cnrtQueue_t queue) {
+    MLU_TF_NUMERIC_SWITCH(MaskBackwardTyped, grad_output, mask, grad_input, lead, mask_extent, inner, num_elements,
+                          queue)
+}
+
+} // namespace infini_train::kernels::mlu

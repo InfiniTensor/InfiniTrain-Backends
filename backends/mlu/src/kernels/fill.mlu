@@ -1,0 +1,71 @@
+// 纯 BANG C kernel + 启动器（cncc 编译，只允许 C++11 级别语法，不含框架头）。
+// 框架集成见同目录 fill.cc。
+
+#include <stdint.h>
+#include <string.h>
+
+#include <bang.h>
+
+#include "kernels/mlu_kernel_api.h"
+
+namespace {
+// TODO(perf): 任务数先取保守值（4 个 union1 任务 = 16 核），性能是任务三的事
+constexpr uint32_t kDefaultTaskCount = 4;
+
+template <typename T> __mlu_global__ void FillKernel(T *data, T value, int64_t size) {
+
+    for (int64_t idx = 0; idx < size; ++idx) { data[idx] = value; }
+}
+
+template <typename T> void FillTyped(void *data, uint64_t value_bits, int64_t num_elements, cnrtQueue_t queue) {
+    T value;
+    memcpy(&value, &value_bits, sizeof(T));
+    const cnrtDim3_t dim = {1, 1, 1};
+    FillKernel<T><<<dim, cnrtFuncTypeBlock, queue>>>(static_cast<T *>(data), value, num_elements);
+}
+} // namespace
+
+namespace infini_train::kernels::mlu {
+
+void FillLaunch(void *data, uint64_t value_bits, MluScalarType type, int64_t num_elements, cnrtQueue_t queue) {
+    switch (type) {
+    case MluScalarType::kU8:
+        FillTyped<uint8_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kI8:
+        FillTyped<int8_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kU16:
+        FillTyped<uint16_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kI16:
+        FillTyped<int16_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kU32:
+        FillTyped<uint32_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kI32:
+        FillTyped<int32_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kU64:
+        FillTyped<uint64_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kI64:
+        FillTyped<int64_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kF16:
+        FillTyped<half>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kBF16:
+        FillTyped<bfloat16_t>(data, value_bits, num_elements, queue);
+        break;
+    case MluScalarType::kF32:
+        FillTyped<float>(data, value_bits, num_elements, queue);
+        break;
+    default:
+        // MLU 设备不支持 FP64；bool 与 CUDA 后端一致不 dispatch（见 fill.cc）
+        break;
+    }
+}
+
+} // namespace infini_train::kernels::mlu
