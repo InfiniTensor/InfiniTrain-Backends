@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -18,6 +19,110 @@
 #include "runtime/maca_runtime_common.h"
 
 namespace infini_train::kernels::maca {
+namespace {
+
+constexpr int kThreads = 256;
+
+int Blocks(int64_t count) { return static_cast<int>(std::min<int64_t>((count + kThreads - 1) / kThreads, 65535)); }
+
+// Pack only matrix elements, preserving the caller's padding and broadcast strides.
+template <typename Src, typename Dst>
+__global__ void CopyMatrix(const Src *src, Dst *dst, int rows, int cols, int src_ld, int dst_ld, int64_t src_stride,
+                           int64_t dst_stride, int64_t count) {
+    const int64_t matrix_size = static_cast<int64_t>(rows) * cols;
+    for (int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; idx < count;
+         idx += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+        const int64_t batch = idx / matrix_size;
+        const int64_t element = idx % matrix_size;
+        const int64_t row = element % rows;
+        const int64_t col = element / rows;
+        dst[batch * dst_stride + col * dst_ld + row] = static_cast<Dst>(src[batch * src_stride + col * src_ld + row]);
+    }
+}
+
+__global__ void ScaleOutput(float *output, int rows, int cols, int ld, int64_t stride, int64_t count, double beta) {
+    const int64_t matrix_size = static_cast<int64_t>(rows) * cols;
+    for (int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; idx < count;
+         idx += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+        const int64_t batch = idx / matrix_size;
+        const int64_t element = idx % matrix_size;
+        const int64_t offset = batch * stride + (element / rows) * ld + element % rows;
+        output[offset] = beta == 0.0 ? 0.0f : static_cast<float>(beta * static_cast<double>(output[offset]));
+    }
+}
+
+} // namespace
+
+void GemmFp64Accum(Device device, GemmParams params, mcblasHandle_t blas_handle) {
+    CHECK_GE(params.m, 0);
+    CHECK_GE(params.n, 0);
+    CHECK_GE(params.k, 0);
+    CHECK_GE(params.batch_count, 0);
+    if (params.m == 0 || params.n == 0 || params.batch_count == 0) {
+        return;
+    }
+
+    mcStream_t stream = nullptr;
+    MCBLAS_CHECK(mcblasGetStream(blas_handle, &stream));
+    const int64_t c_size = static_cast<int64_t>(params.m) * params.n;
+    const int64_t c_count = c_size * params.batch_count;
+    const double alpha = params.alpha;
+    const double beta = params.beta;
+    if (params.k == 0 || alpha == 0.0) {
+        ScaleOutput<<<Blocks(c_count), kThreads, 0, stream>>>(static_cast<float *>(params.C), params.m, params.n,
+                                                              params.ldc, params.stride_c, c_count, beta);
+        MACA_CHECK(mcGetLastError());
+        return;
+    }
+
+    const bool transpose_a = params.trans_a == GemmTranspose::kTranspose;
+    const bool transpose_b = params.trans_b == GemmTranspose::kTranspose;
+    const int a_rows = transpose_a ? params.k : params.m;
+    const int a_cols = transpose_a ? params.m : params.k;
+    const int b_rows = transpose_b ? params.n : params.k;
+    const int b_cols = transpose_b ? params.k : params.n;
+    const int64_t a_size = static_cast<int64_t>(a_rows) * a_cols;
+    const int64_t b_size = static_cast<int64_t>(b_rows) * b_cols;
+    const int64_t a_count = a_size * params.batch_count;
+    const int64_t b_count = b_size * params.batch_count;
+
+    // mcBLAS does not support FP32 A/B/C with COMPUTE_64F. Convert exact FP32
+    // values to double, perform the full GEMM in double, then round C once.
+    Tensor a64({params.batch_count, a_cols, a_rows}, DataType::kFLOAT64, device);
+    Tensor b64({params.batch_count, b_cols, b_rows}, DataType::kFLOAT64, device);
+    Tensor c64({params.batch_count, params.n, params.m}, DataType::kFLOAT64, device);
+    auto *a = static_cast<double *>(a64.DataPtr());
+    auto *b = static_cast<double *>(b64.DataPtr());
+    auto *c = static_cast<double *>(c64.DataPtr());
+
+    CopyMatrix<<<Blocks(a_count), kThreads, 0, stream>>>(static_cast<const float *>(params.A), a, a_rows, a_cols,
+                                                         params.lda, a_rows, params.stride_a, a_size, a_count);
+    MACA_CHECK(mcGetLastError());
+    CopyMatrix<<<Blocks(b_count), kThreads, 0, stream>>>(static_cast<const float *>(params.B), b, b_rows, b_cols,
+                                                         params.ldb, b_rows, params.stride_b, b_size, b_count);
+    MACA_CHECK(mcGetLastError());
+    if (beta != 0.0) {
+        CopyMatrix<<<Blocks(c_count), kThreads, 0, stream>>>(static_cast<const float *>(params.C), c, params.m,
+                                                             params.n, params.ldc, params.m, params.stride_c, c_size,
+                                                             c_count);
+        MACA_CHECK(mcGetLastError());
+    }
+
+    const auto trans_a = transpose_a ? MCBLAS_OP_T : MCBLAS_OP_N;
+    const auto trans_b = transpose_b ? MCBLAS_OP_T : MCBLAS_OP_N;
+    if (params.batch_count == 1) {
+        MCBLAS_CHECK(mcblasDgemm(blas_handle, trans_a, trans_b, params.m, params.n, params.k, &alpha, a, a_rows, b,
+                                 b_rows, &beta, c, params.m));
+    } else {
+        MCBLAS_CHECK(mcblasDgemmStridedBatched(blas_handle, trans_a, trans_b, params.m, params.n, params.k, &alpha, a,
+                                               a_rows, a_size, b, b_rows, b_size, &beta, c, params.m, c_size,
+                                               params.batch_count));
+    }
+
+    CopyMatrix<<<Blocks(c_count), kThreads, 0, stream>>>(c, static_cast<float *>(params.C), params.m, params.n,
+                                                         params.m, params.ldc, c_size, params.stride_c, c_count);
+    MACA_CHECK(mcGetLastError());
+}
 
 std::shared_ptr<Tensor> MatmulForward(const std::shared_ptr<Tensor> &input, const std::shared_ptr<Tensor> &other) {
     /*

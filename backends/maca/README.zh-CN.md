@@ -15,6 +15,7 @@
 - 兼容的 **MACA SDK**，包含支持 C++20 的 `mxgpu_llvm/bin/mxcc` 编译器、MACA
   运行时、MCDNN、MCBLAS 及 SDK 自带的 OpenMP 运行时
 - 启用分布式集合通信时需要 **MCCL**（默认启用）
+- 快速开始中的构建命令需要 **GNU Make**
 - 使用自动化模型测试脚本时需要 Python 3（仅使用标准库）
 
 ## 🚀 快速开始
@@ -26,17 +27,15 @@
 git submodule update --init --recursive
 export MACA_PATH=/opt/maca
 
-cmake -S . -B build-maca \
-  -DINFINITRAIN_BACKEND=maca \
-  -DINFINITRAIN_MACA_WITH_MCCL=ON \
-  -DBUILD_TEST=ON
-cmake --build build-maca -j
+mkdir build
+cd build
+cmake .. -DINFINITRAIN_BACKEND=maca -DINFINITRAIN_MACA_WITH_MCCL=ON
+make -j
 ```
 
-示例可执行文件输出到 `build-maca`。进入该目录后可查看各示例的命令行选项：
+示例可执行文件输出到当前的 `build` 目录。可直接查看各示例的命令行选项：
 
 ```bash
-cd build-maca
 ./gpt2 --help
 ./llama3 --help
 ./mixtral --help
@@ -78,6 +77,7 @@ GPT-2 和 LLaMA 3 使用 `--batch_size` 与 `--total_batch_size`；Mixtral 使�
 和测例也会继承。运行前，请修改
 覆盖配置中的数据集和 checkpoint 路径。
 入口脚本使用 Python 标准库处理 JSON，包括上游脚本的配置查询，无需安装 `jq`。
+自动测试默认在 `build/maca` 中构建，脚本会在每次重新构建前和运行结束后清理该目录。
 
 请在已配置 MACA SDK 环境的另一个 shell 中，从仓库根目录运行全部已配置的模型
 测试：
@@ -91,12 +91,12 @@ backends/maca/scripts/run_models_and_profile.bash
 
 ## 单元测试
 
-快速开始中的命令已通过 `BUILD_TEST=ON` 构建单元测试。如需在现有 MACA 构建目录
-中启用并构建单元测试，可执行：
+单元测试默认关闭。在快速开始创建的 `build` 目录中，执行以下命令启用并构建
+单元测试：
 
 ```bash
 cmake .. -DBUILD_TEST=ON
-cmake --build . -j
+make -j
 ctest -L maca --output-on-failure
 ```
 
