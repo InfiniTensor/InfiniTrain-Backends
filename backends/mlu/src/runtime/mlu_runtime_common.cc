@@ -20,22 +20,16 @@ unsigned int ToCnrtNotifierFlags(EventFlag flags) {
     return CNRT_NOTIFIER_DEFAULT;
 }
 
-MluEvent::MluEvent(EventFlag flags) {
-    MLU_CHECK(cnrtNotifierCreateWithFlags(&event_, ToCnrtNotifierFlags(flags)));
-}
+MluEvent::MluEvent(EventFlag flags) { MLU_CHECK(cnrtNotifierCreateWithFlags(&event_, ToCnrtNotifierFlags(flags))); }
 
 // See the class comment: no CNRT calls during teardown.
 MluEvent::~MluEvent() = default;
 
 cnrtNotifier_t MluEvent::mlu_event() const { return event_; }
 
-MluStream::MluStream() {
-    MLU_CHECK(cnrtQueueCreate(&queue_));
-}
+MluStream::MluStream() { MLU_CHECK(cnrtQueueCreate(&queue_)); }
 
-MluStream::MluStream(int priority) {
-    MLU_CHECK(cnrtQueueCreateWithPriority(&queue_, 0, priority));
-}
+MluStream::MluStream(int priority) { MLU_CHECK(cnrtQueueCreateWithPriority(&queue_, 0, priority)); }
 
 // See the class comment: no CNRT calls during teardown.
 MluStream::~MluStream() = default;
