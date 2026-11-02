@@ -92,7 +92,7 @@ inline cnrtQueue_t GetMluQueue(Stream *stream) {
     return mlu_stream->mlu_queue();
 }
 
-cnrtMemcpyKind_t ToCnrtMemcpyKind(MemcpyKind kind, const char *context) {
+cnrtMemTransDir_t ToCnrtMemcpyKind(MemcpyKind kind, const char *context) {
     switch (kind) {
     case MemcpyKind::kH2D:
         return cnrtMemcpyHostToDev;
@@ -342,12 +342,12 @@ void MluGuardImpl::FreeAsync(void *dev_ptr, Stream *stream) {
 }
 
 void MluGuardImpl::Memcpy(void *dst, const void *src, size_t count, MemcpyKind kind) {
-    const cnrtMemcpyKind_t cnrt_kind = ToCnrtMemcpyKind(kind, "MluGuardImpl::Memcpy");
+    const cnrtMemTransDir_t cnrt_kind = ToCnrtMemcpyKind(kind, "MluGuardImpl::Memcpy");
     MLU_CHECK(cnrtMemcpy(dst, const_cast<void *>(src), count, cnrt_kind));
 }
 
 void MluGuardImpl::MemcpyAsync(void *dst, const void *src, size_t count, MemcpyKind kind, Stream *stream) {
-    const cnrtMemcpyKind_t cnrt_kind = ToCnrtMemcpyKind(kind, "MluGuardImpl::MemcpyAsync");
+    const cnrtMemTransDir_t cnrt_kind = ToCnrtMemcpyKind(kind, "MluGuardImpl::MemcpyAsync");
     auto mlu_queue = GetMluQueue(stream);
     MLU_CHECK(cnrtMemcpyAsync(dst, const_cast<void *>(src), count, mlu_queue, cnrt_kind));
 }

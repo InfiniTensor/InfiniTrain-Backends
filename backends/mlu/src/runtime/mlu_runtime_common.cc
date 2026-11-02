@@ -46,7 +46,7 @@ MluBlasHandle::MluBlasHandle(Stream *stream) {
     auto *mlu_stream = dynamic_cast<MluStream *>(stream);
     CHECK_NOTNULL(mlu_stream);
 
-    MLU_CHECK(cnnlCreate(&cnnl_handle_));
+    CNNL_CHECK(cnnlCreate(&cnnl_handle_));
     CNNL_CHECK(cnnlSetQueue(cnnl_handle_, mlu_stream->mlu_queue()));
 }
 
