@@ -4,11 +4,23 @@ find_library(MLU_DNN_LIBRARY NAMES cnnl HINTS "${NEUWARE_HOME}/lib64" REQUIRED)
 
 set(MLU_BACKEND_SOURCES
   src/backend.cc
+  src/kernels/cast.cc
+  src/kernels/fill.cc
+  src/kernels/no_op.cc
   src/runtime/mlu_guard_impl.cc
   src/runtime/mlu_runtime_common.cc
 )
 
-add_library(infini_train_backend_mlu STATIC ${MLU_BACKEND_SOURCES})
+# BANG device kernels, compiled with the vendor toolchain; the object carries
+# both the device code and its host launch wrappers.
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/mlu_fill_device.o
+  COMMAND ${NEUWARE_HOME}/bin/cncc --bang-arch=compute_50 -std=c++14 -fPIE -c ${CMAKE_CURRENT_SOURCE_DIR}/src/kernels/fill.mlu
+          -o ${CMAKE_CURRENT_BINARY_DIR}/mlu_fill_device.o
+  DEPENDS src/kernels/fill.mlu
+  COMMENT "cncc: compiling src/kernels/fill.mlu for compute_50"
+  VERBATIM)
+
+add_library(infini_train_backend_mlu STATIC ${MLU_BACKEND_SOURCES} ${CMAKE_CURRENT_BINARY_DIR}/mlu_fill_device.o)
 add_library(InfiniTrain::Backend::MLU ALIAS infini_train_backend_mlu)
 
 target_include_directories(infini_train_backend_mlu

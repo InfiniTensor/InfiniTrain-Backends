@@ -1,0 +1,73 @@
+// BANG device kernels for the Fill op, plus the dtype-agnostic host launcher.
+//
+// Fill fills every element of a device buffer with a constant. The value
+// travels from the host as an element-sized bit pattern, so a single pair of
+// kernels covers every framework dtype: 8-byte and 4-byte element buffers are
+// filled with the pattern word directly; 2-byte and 1-byte element buffers are
+// filled through a uniform 4-byte repeat plus a small byte-wise tail.
+
+#include "bang.h"
+#include "cnrt.h"
+
+#include <cstdint>
+
+namespace {
+
+template <typename T> __mlu_global__ void FillPatternKernel(T *dst, T pattern, unsigned int n) {
+    // Contiguous per-task chunking: taskId in [0, taskDim), one core per task.
+    unsigned int per = (n + taskDim - 1) / taskDim;
+    unsigned int begin = taskId * per;
+    unsigned int end = begin + per;
+    if (end > n) {
+        end = n;
+    }
+    for (unsigned int i = begin; i < end; i++) { dst[i] = pattern; }
+}
+
+__mlu_global__ void FillTailKernel(unsigned char *dst, unsigned int pattern, unsigned int n) {
+    unsigned int per = (n + taskDim - 1) / taskDim;
+    unsigned int begin = taskId * per;
+    unsigned int end = begin + per;
+    if (end > n) {
+        end = n;
+    }
+    for (unsigned int i = begin; i < end; i++) { dst[i] = (unsigned char)((pattern >> (8 * i)) & 0xffu); }
+}
+
+} // namespace
+
+// dtype_tag is the element size in bytes (1/2/4/8); pattern carries the
+// element bit pattern in its low bytes. num_elements fits in 32 bits for any
+// tensor the framework can allocate today (checked by the host side).
+extern "C" void infini_train_mlu_fill_pattern(void *dst, unsigned int elemsize, unsigned long long pattern,
+                                              unsigned int num_elements, cnrtDim3_t dim, cnrtFunctionType_t func_type,
+                                              cnrtQueue_t queue) {
+    if (elemsize == 8) {
+        FillPatternKernel<unsigned long long>
+            <<<dim, func_type, queue>>>((unsigned long long *)dst, pattern, num_elements);
+        return;
+    }
+    if (elemsize == 4) {
+        FillPatternKernel<unsigned int>
+            <<<dim, func_type, queue>>>((unsigned int *)dst, (unsigned int)pattern, num_elements);
+        return;
+    }
+    unsigned char *base = (unsigned char *)dst;
+    unsigned int total_bytes = num_elements * elemsize;
+    unsigned int pat32;
+    if (elemsize == 2) {
+        unsigned int lo16 = (unsigned int)(pattern & 0xffffu);
+        pat32 = lo16 | (lo16 << 16);
+    } else {
+        unsigned int byte = (unsigned int)(pattern & 0xffu);
+        pat32 = byte | (byte << 8) | (byte << 16) | (byte << 24);
+    }
+    unsigned int n32 = total_bytes / 4;
+    if (n32 > 0) {
+        FillPatternKernel<unsigned int><<<dim, func_type, queue>>>((unsigned int *)dst, pat32, n32);
+    }
+    unsigned int tail_bytes = total_bytes - n32 * 4;
+    if (tail_bytes > 0) {
+        FillTailKernel<<<dim, func_type, queue>>>(base + n32 * 4, pattern, tail_bytes);
+    }
+}
