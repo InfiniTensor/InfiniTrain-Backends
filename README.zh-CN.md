@@ -25,6 +25,7 @@ InfiniTrain 子模块。每个构建目录只选择一个后端，每个进程�
 | 后端 | 运行时 | 集合通信 | 模型示例 |
 | ---- | ------ | -------- | -------- |
 | [MACA](backends/maca/README.zh-CN.md) | MACA | MCCL（可选） | GPT-2、LLaMA 3、Mixtral |
+| [MLU](backends/mlu/README.md)（开发中） | CNRT | — | GPT-2 |
 
 模型源码通常来自锁定版本的 InfiniTrain 子模块。各后端提供运行时、算子、集合通信
 实现和构建集成，以便在对应加速器上运行其支持的模型示例。环境配置和使用方式见上表
@@ -103,6 +104,21 @@ CMake 无法在启用某种语言后更换其编译器。
 
 clang-format、clang-tidy 和 IWYU 的范围、依赖及手动使用方式见
 [代码格式和静态检查](scripts/README.md)。
+
+## 寒武纪 MLU 后端（开发中）
+
+`backends/mlu` 通过 `PrivateUse1` 注册名为 `mlu` 的后端。小 shape 的 FP32 算子
+和设备数学函数已有回归工具覆盖；设备 GEMM、完整 GPT-2 十步精度、BF16 和多卡
+集合通信**尚未完成**。
+
+```bash
+cmake -S . -B build-mlu -G Ninja \
+  -DINFINITRAIN_BACKEND=mlu -DUSE_CUDA=OFF -DBUILD_TEST=OFF
+cmake --build build-mlu --target mlu_gpt2 mlu_op_test -j
+```
+
+SDK 依赖见 [MLU 后端指南](backends/mlu/README.md)，实际验证状态见
+[验证状态](backends/mlu/docs/validation.md)。
 
 ## 许可证
 

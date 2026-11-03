@@ -1,0 +1,159 @@
+// 纯 BANG C kernel + 启动器（cncc 编译，只允许 C++11 级别语法，不含框架头）。
+// 框架集成见同目录 layernorm.cc。
+// 语义对应上游 src/kernels/cuda/layernorm.cu。
+// 简化策略（正确性优先，性能属任务三）：一行（token）分配一个核串行归约，
+// FP32 累加、顺序确定；不引入跨核 SRAM block reduce。
+
+#include <stdint.h>
+
+#include <bang.h>
+
+#include "kernels/mlu_kernel_api.h"
+
+namespace {
+using infini_train::kernels::mlu::MluScalarType;
+
+constexpr uint32_t kDefaultTaskCount = 4;
+
+// 注意（实测）：本工具链下 taskIdX/coreId/taskDimX/coreDim 与预期语义不符，配合
+// cnrtFuncTypeUnion1 时循环写 GDRAM 只有首尾元素落盘。厂商示例（samples/BANG/.../
+// vectoradd/0_scalarAdd_single_core）用的是纯串行循环 + cnrtFuncTypeBlock。
+// 因此所有 kernel 统一改为单任务串行；性能优化属任务三，届时再按官方多核范式改写。
+
+template <typename T>
+__mlu_global__ void LayerNormForwardKernel(const T *input, const T *weight, const T *bias, float *mean_out,
+                                           float *rstd_out, T *output, float eps, int64_t num_tokens,
+                                           int64_t embed_dim) {
+    for (int64_t token = 0; token < num_tokens; ++token) {
+        const T *x = input + token * embed_dim;
+        T *y = output + token * embed_dim;
+
+        float sum = 0.0f;
+        float sqsum = 0.0f;
+        for (int64_t i = 0; i < embed_dim; ++i) {
+            const float val = static_cast<float>(x[i]);
+            sum += val;
+            sqsum += val * val;
+        }
+        const float mean = sum / embed_dim;
+        const float var = sqsum / embed_dim - mean * mean;
+        const float rstd = 1.0f / sqrtf(var + eps);
+        if (mean_out) {
+            mean_out[token] = mean;
+        }
+        if (rstd_out) {
+            rstd_out[token] = rstd;
+        }
+
+        for (int64_t i = 0; i < embed_dim; ++i) {
+            const float norm = (static_cast<float>(x[i]) - mean) * rstd;
+            y[i] = static_cast<T>(norm * static_cast<float>(weight[i]) + static_cast<float>(bias[i]));
+        }
+    }
+}
+
+template <typename T>
+__mlu_global__ void LayerNormInputGradKernel(const T *input, const T *grad_output, const float *mean, const float *rstd,
+                                             const T *weight, T *grad_input, int64_t num_tokens, int64_t embed_dim) {
+    for (int64_t token = 0; token < num_tokens; ++token) {
+        const T *x = input + token * embed_dim;
+        const T *g = grad_output + token * embed_dim;
+        T *gi = grad_input + token * embed_dim;
+        const float mean_val = mean[token];
+        const float rstd_val = rstd[token];
+
+        float dnorm_mean = 0.0f;
+        float dnorm_norm_mean = 0.0f;
+        for (int64_t i = 0; i < embed_dim; ++i) {
+            const float dnorm = static_cast<float>(weight[i]) * static_cast<float>(g[i]);
+            const float norm = (static_cast<float>(x[i]) - mean_val) * rstd_val;
+            dnorm_mean += dnorm;
+            dnorm_norm_mean += dnorm * norm;
+        }
+        dnorm_mean /= embed_dim;
+        dnorm_norm_mean /= embed_dim;
+
+        for (int64_t i = 0; i < embed_dim; ++i) {
+            const float norm = (static_cast<float>(x[i]) - mean_val) * rstd_val;
+            gi[i] = static_cast<T>(
+                (static_cast<float>(weight[i]) * static_cast<float>(g[i]) - dnorm_mean - norm * dnorm_norm_mean)
+                * rstd_val);
+        }
+    }
+}
+
+// 一个核负责一个 feature，串行扫所有 token（确定性顺序）
+template <typename T>
+__mlu_global__ void LayerNormParameterGradKernel(const T *input, const T *grad_output, const float *mean,
+                                                 const float *rstd, T *grad_weight, T *grad_bias, int64_t num_tokens,
+                                                 int64_t embed_dim) {
+    for (int64_t feature = 0; feature < embed_dim; ++feature) {
+        float gw = 0.0f;
+        float gb = 0.0f;
+        for (int64_t token = 0; token < num_tokens; ++token) {
+            const int64_t offset = token * embed_dim + feature;
+            const float g = static_cast<float>(grad_output[offset]);
+            const float norm = (static_cast<float>(input[offset]) - mean[token]) * rstd[token];
+            gw += g * norm;
+            gb += g;
+        }
+        grad_weight[feature] = static_cast<T>(gw);
+        grad_bias[feature] = static_cast<T>(gb);
+    }
+}
+
+template <typename T>
+void LayerNormForwardTyped(const void *input, const void *weight, const void *bias, float *mean_out, float *rstd_out,
+                           void *output, float eps, int64_t num_tokens, int64_t embed_dim, cnrtQueue_t queue) {
+    const cnrtDim3_t dim = {1, 1, 1};
+    LayerNormForwardKernel<T><<<dim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<const T *>(input), static_cast<const T *>(weight), static_cast<const T *>(bias), mean_out, rstd_out,
+        static_cast<T *>(output), eps, num_tokens, embed_dim);
+}
+
+template <typename T>
+void LayerNormBackwardTyped(const void *input, const void *grad_output, const float *mean, const float *rstd,
+                            const void *weight, void *grad_input, void *grad_weight, void *grad_bias,
+                            int64_t num_tokens, int64_t embed_dim, cnrtQueue_t queue) {
+    const cnrtDim3_t dim = {1, 1, 1};
+    LayerNormInputGradKernel<T><<<dim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<const T *>(input), static_cast<const T *>(grad_output), mean, rstd, static_cast<const T *>(weight),
+        static_cast<T *>(grad_input), num_tokens, embed_dim);
+    LayerNormParameterGradKernel<T><<<dim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<const T *>(input), static_cast<const T *>(grad_output), mean, rstd, static_cast<T *>(grad_weight),
+        static_cast<T *>(grad_bias), num_tokens, embed_dim);
+}
+
+#define MLU_LN_FLOAT_SWITCH(fn, ...)                                                                                   \
+    switch (type) {                                                                                                    \
+    case MluScalarType::kF16:                                                                                          \
+        fn<half>(__VA_ARGS__);                                                                                         \
+        return;                                                                                                        \
+    case MluScalarType::kBF16:                                                                                         \
+        fn<bfloat16_t>(__VA_ARGS__);                                                                                   \
+        return;                                                                                                        \
+    case MluScalarType::kF32:                                                                                          \
+        fn<float>(__VA_ARGS__);                                                                                        \
+        return;                                                                                                        \
+    default:                                                                                                           \
+        return;                                                                                                        \
+    }
+} // namespace
+
+namespace infini_train::kernels::mlu {
+
+void LayerNormForwardLaunch(const void *input, const void *weight, const void *bias, float *mean_out, float *rstd_out,
+                            void *output, float eps, int64_t num_tokens, int64_t embed_dim, MluScalarType type,
+                            cnrtQueue_t queue) {
+    MLU_LN_FLOAT_SWITCH(LayerNormForwardTyped, input, weight, bias, mean_out, rstd_out, output, eps, num_tokens,
+                        embed_dim, queue)
+}
+
+void LayerNormBackwardLaunch(const void *input, const void *grad_output, const float *mean, const float *rstd,
+                             const void *weight, void *grad_input, void *grad_weight, void *grad_bias,
+                             int64_t num_tokens, int64_t embed_dim, MluScalarType type, cnrtQueue_t queue) {
+    MLU_LN_FLOAT_SWITCH(LayerNormBackwardTyped, input, grad_output, mean, rstd, weight, grad_input, grad_weight,
+                        grad_bias, num_tokens, embed_dim, queue)
+}
+
+} // namespace infini_train::kernels::mlu

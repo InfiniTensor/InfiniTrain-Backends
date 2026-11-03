@@ -1,0 +1,481 @@
+// 纯 BANG C kernel + 启动器（cncc 编译，只允许 C++11 级别语法，不含框架头）。
+// 框架集成见同目录 elementwise.cc。
+// 语义对应上游 src/kernels/cuda/elementwise.cu；约定：
+//   - 16 位浮点一律经 float 中转计算（FP32 中间精度）；
+//   - 广播反向用确定性 gather 累加（不用 atomic），FP32 累加。
+
+#include <stdint.h>
+#include <type_traits>
+
+#include <bang.h>
+
+#include "kernels/mlu_kernel_api.h"
+
+namespace {
+using infini_train::kernels::mlu::MluBinaryOp;
+using infini_train::kernels::mlu::MluBroadcastMeta;
+using infini_train::kernels::mlu::MluScalarType;
+using infini_train::kernels::mlu::MluUnaryOp;
+
+constexpr uint32_t kDefaultTaskCount = 4;
+
+// 注意（实测）：本工具链下 taskIdX/coreId/taskDimX/coreDim 与预期语义不符，配合
+// cnrtFuncTypeUnion1 时循环写 GDRAM 只有首尾元素落盘。厂商示例（samples/BANG/.../
+// vectoradd/0_scalarAdd_single_core）用的是纯串行循环 + cnrtFuncTypeBlock。
+// 因此所有 kernel 统一改为单任务串行；性能优化属任务三，届时再按官方多核范式改写。
+
+// 与 CUDA 版 CalcOffset 相同：把 out 的线性下标映射到广播输入的偏移
+__mlu_func__ int64_t CalcOffset(int64_t idx, int ndim, const int64_t *strides, const int64_t *shape,
+                                const int64_t *out_strides) {
+    int64_t offset = 0;
+    for (int i = 0; i < ndim; ++i) {
+        const int64_t out_index = (idx / out_strides[i]) % shape[i];
+        offset += (shape[i] == 1 ? 0 : out_index) * strides[i];
+    }
+    return offset;
+}
+
+// ----------------------------- 一元 -----------------------------
+
+__mlu_func__ float UnaryFwdEval(MluUnaryOp op, float x) {
+    switch (op) {
+    case MluUnaryOp::kNeg:
+        return -x;
+    case MluUnaryOp::kReciprocal:
+        return 1.0f / x;
+    case MluUnaryOp::kTanh:
+        return tanhf(x);
+    case MluUnaryOp::kRsqrt:
+        return 1.0f / sqrtf(x);
+    case MluUnaryOp::kExp:
+        return expf(x);
+    case MluUnaryOp::kLog:
+        return logf(x);
+    case MluUnaryOp::kSin:
+        return sinf(x);
+    case MluUnaryOp::kCos:
+        return cosf(x);
+    case MluUnaryOp::kSigmoid:
+        return 1.0f / (1.0f + expf(-x));
+    }
+    return 0.0f;
+}
+
+// aux 语义：tanh/exp/sigmoid 传 forward 的 output，其余传 input
+__mlu_func__ float UnaryBwdEval(MluUnaryOp op, float g, float aux) {
+    switch (op) {
+    case MluUnaryOp::kNeg:
+        return -g;
+    case MluUnaryOp::kReciprocal:
+        return -g / (aux * aux);
+    case MluUnaryOp::kTanh:
+        return g * (1.0f - aux * aux);
+    case MluUnaryOp::kRsqrt:
+        return -0.5f * g / (aux * sqrtf(aux));
+    case MluUnaryOp::kExp:
+        return g * aux;
+    case MluUnaryOp::kLog:
+        return g / aux;
+    case MluUnaryOp::kSin:
+        return g * cosf(aux);
+    case MluUnaryOp::kCos:
+        return -g * sinf(aux);
+    case MluUnaryOp::kSigmoid:
+        return g * aux * (1.0f - aux);
+    }
+    return 0.0f;
+}
+
+template <typename T> __mlu_global__ void UnaryForwardKernel(T *out, const T *in, MluUnaryOp op, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) { out[i] = static_cast<T>(UnaryFwdEval(op, static_cast<float>(in[i]))); }
+}
+
+template <typename T>
+__mlu_global__ void UnaryBackwardKernel(T *grad_in, const T *grad_out, const T *aux, MluUnaryOp op, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) {
+        grad_in[i] = static_cast<T>(UnaryBwdEval(op, static_cast<float>(grad_out[i]), static_cast<float>(aux[i])));
+    }
+}
+
+// 说明：设备侧 powf 在「单任务串行 + cnrtFuncTypeBlock」启动下已实测可用
+// （tests/math_selftest：powf(x,3) 与 host 参考最大绝对误差 1.91e-06，bad=0/1024）。
+// 历史上“powf 返回 NaN”的结论源于错误的多任务/Union1 启动配置，已作废。
+template <typename T>
+__mlu_global__ void PowForwardKernel(T *out, const T *in, float exponent, bool scalar_is_base, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) {
+        const float x = static_cast<float>(in[i]);
+        out[i] = static_cast<T>(scalar_is_base ? powf(exponent, x) : powf(x, exponent));
+    }
+}
+
+template <typename T>
+__mlu_global__ void PowBackwardKernel(T *grad_in, const T *grad_out, const T *in, float exponent, bool scalar_is_base,
+                                      int64_t n) {
+    for (int64_t i = 0; i < n; ++i) {
+        const float g = static_cast<float>(grad_out[i]);
+        const float x = static_cast<float>(in[i]);
+        // scalar_is_base: d(base^x)/dx = base^x * ln(base)
+        // 否则:           d(x^e)/dx   = e * x^(e-1)
+        const float v
+            = scalar_is_base ? g * powf(exponent, x) * logf(exponent) : g * exponent * powf(x, exponent - 1.0f);
+        grad_in[i] = static_cast<T>(v);
+    }
+}
+
+// ----------------------------- 二元（广播） -----------------------------
+
+__mlu_func__ float BinaryFwdEval(MluBinaryOp op, float a, float b) {
+    switch (op) {
+    case MluBinaryOp::kAdd:
+        return a + b;
+    case MluBinaryOp::kSub:
+        return a - b;
+    case MluBinaryOp::kMul:
+        return a * b;
+    case MluBinaryOp::kDiv:
+        return a / b;
+    }
+    return 0.0f;
+}
+
+// side A 的 grad 公式
+__mlu_func__ float BinaryBwdEvalA(MluBinaryOp op, float g, float a, float b) {
+    switch (op) {
+    case MluBinaryOp::kAdd:
+        return g;
+    case MluBinaryOp::kSub:
+        return g;
+    case MluBinaryOp::kMul:
+        return g * b;
+    case MluBinaryOp::kDiv:
+        return g / b;
+    }
+    return 0.0f;
+}
+
+// side B 的 grad 公式
+__mlu_func__ float BinaryBwdEvalB(MluBinaryOp op, float g, float a, float b) {
+    switch (op) {
+    case MluBinaryOp::kAdd:
+        return g;
+    case MluBinaryOp::kSub:
+        return -g;
+    case MluBinaryOp::kMul:
+        return g * a;
+    case MluBinaryOp::kDiv:
+        return -g * a / (b * b);
+    }
+    return 0.0f;
+}
+
+template <typename T>
+__mlu_global__ void BinaryForwardKernel(T *out, const T *a, const T *b, MluBinaryOp op, MluBroadcastMeta meta,
+                                        int64_t n) {
+    for (int64_t i = 0; i < n; ++i) {
+        const int64_t a_off = CalcOffset(i, meta.ndim, meta.a_strides, meta.a_shape, meta.out_strides);
+        const int64_t b_off = CalcOffset(i, meta.ndim, meta.b_strides, meta.b_shape, meta.out_strides);
+        out[i] = static_cast<T>(BinaryFwdEval(op, static_cast<float>(a[a_off]), static_cast<float>(b[b_off])));
+    }
+}
+
+// 无广播快路径：三侧形状一致，一一对应
+template <typename T>
+__mlu_global__ void BinaryBackwardNoBroadcastKernel(T *grad_a, T *grad_b, const T *grad_out, const T *a, const T *b,
+                                                    MluBinaryOp op, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) {
+        const float g = static_cast<float>(grad_out[i]);
+        const float av = static_cast<float>(a[i]);
+        const float bv = static_cast<float>(b[i]);
+        grad_a[i] = static_cast<T>(BinaryBwdEvalA(op, g, av, bv));
+        grad_b[i] = static_cast<T>(BinaryBwdEvalB(op, g, av, bv));
+    }
+}
+
+// 广播反向（gather 归约）：对 dst（= a 或 b 的 grad）的每个元素，枚举其在 out
+// 中对应的 collapsed 下标组合并累加。kSideA=true 时 dst 对应 a，否则对应 b。
+template <typename T, bool kSideA>
+__mlu_global__ void BinaryBackwardReduceKernel(T *grad_dst, const T *grad_out, const T *a, const T *b, MluBinaryOp op,
+                                               MluBroadcastMeta meta, int64_t numel_dst, int64_t numel_out) {
+    const int64_t *dst_shape = kSideA ? meta.a_shape : meta.b_shape;
+    const int64_t *dst_strides = kSideA ? meta.a_strides : meta.b_strides;
+
+    for (int64_t i = 0; i < numel_dst; ++i) {
+        // 分解 i 到 dst（右对齐后）各维坐标
+        int64_t coord[MLU_MAX_BROADCAST_DIMS];
+        for (int d = 0; d < meta.ndim; ++d) { coord[d] = dst_shape[d] > 1 ? (i / dst_strides[d]) % dst_shape[d] : 0; }
+        // collapsed 空间 = dst_shape[d]==1 且 out_shape[d]>1 的维
+        int64_t collapsed = 1;
+        for (int d = 0; d < meta.ndim; ++d) {
+            const int64_t out_extent = meta.a_shape[d] > meta.b_shape[d] ? meta.a_shape[d] : meta.b_shape[d];
+            if (dst_shape[d] == 1 && out_extent > 1) {
+                collapsed *= out_extent;
+            }
+        }
+        float acc = 0.0f;
+        for (int64_t j = 0; j < collapsed; ++j) {
+            // 把 j 按各 collapsed 维的 extent 分解，得到完整 out 坐标
+            int64_t rem = j;
+            int64_t out_coord[MLU_MAX_BROADCAST_DIMS];
+            for (int d = 0; d < meta.ndim; ++d) { out_coord[d] = coord[d]; }
+            for (int d = meta.ndim - 1; d >= 0; --d) {
+                const int64_t out_extent = meta.a_shape[d] > meta.b_shape[d] ? meta.a_shape[d] : meta.b_shape[d];
+                if (dst_shape[d] == 1 && out_extent > 1) {
+                    out_coord[d] = rem % out_extent;
+                    rem /= out_extent;
+                }
+            }
+            int64_t out_off = 0;
+            for (int d = 0; d < meta.ndim; ++d) { out_off += out_coord[d] * meta.out_strides[d]; }
+            const int64_t a_off
+                = kSideA ? i : CalcOffset(out_off, meta.ndim, meta.a_strides, meta.a_shape, meta.out_strides);
+            const int64_t b_off
+                = kSideA ? CalcOffset(out_off, meta.ndim, meta.b_strides, meta.b_shape, meta.out_strides) : i;
+            const float g = static_cast<float>(grad_out[out_off]);
+            const float av = static_cast<float>(a[a_off]);
+            const float bv = static_cast<float>(b[b_off]);
+            acc += kSideA ? BinaryBwdEvalA(op, g, av, bv) : BinaryBwdEvalB(op, g, av, bv);
+        }
+        grad_dst[i] = static_cast<T>(acc);
+    }
+    (void)numel_out;
+}
+
+// ----------------------------- 标量二元 -----------------------------
+
+template <typename T>
+__mlu_global__ void ScalarForwardKernel(T *out, const T *in, float scalar, MluBinaryOp op, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) { out[i] = static_cast<T>(BinaryFwdEval(op, static_cast<float>(in[i]), scalar)); }
+}
+
+template <typename T>
+__mlu_global__ void ScalarBackwardKernel(T *grad_in, const T *grad_out, float scalar, MluBinaryOp op, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) {
+        const float g = static_cast<float>(grad_out[i]);
+        // Add: grad = g；Mul: grad = g * scalar
+        grad_in[i] = static_cast<T>(op == MluBinaryOp::kMul ? g * scalar : g);
+    }
+}
+
+// ----------------------------- 相等比较 -----------------------------
+
+template <typename T>
+__mlu_global__ void EqualsForwardKernel(bool *out, const T *a, const T *b, MluBroadcastMeta meta, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) {
+        const int64_t a_off = CalcOffset(i, meta.ndim, meta.a_strides, meta.a_shape, meta.out_strides);
+        const int64_t b_off = CalcOffset(i, meta.ndim, meta.b_strides, meta.b_shape, meta.out_strides);
+        out[i] = a[a_off] == b[b_off];
+    }
+}
+
+template <typename T> __mlu_global__ void EqualsScalarForwardKernel(bool *out, const T *in, T scalar, int64_t n) {
+    for (int64_t i = 0; i < n; ++i) { out[i] = in[i] == scalar; }
+}
+
+// ----------------------------- 启动器 -----------------------------
+
+const cnrtDim3_t kDim = {1, 1, 1};
+
+template <typename T> void UnaryForwardTyped(void *out, const void *in, MluUnaryOp op, int64_t n, cnrtQueue_t queue) {
+    UnaryForwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<T *>(out), static_cast<const T *>(in), op, n);
+}
+
+template <typename T>
+void UnaryBackwardTyped(void *grad_in, const void *grad_out, const void *aux, MluUnaryOp op, int64_t n,
+                        cnrtQueue_t queue) {
+    UnaryBackwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<T *>(grad_in), static_cast<const T *>(grad_out), static_cast<const T *>(aux), op, n);
+}
+
+template <typename T>
+void PowForwardTyped(void *out, const void *in, float exponent, bool scalar_is_base, int64_t n, cnrtQueue_t queue) {
+    PowForwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<T *>(out), static_cast<const T *>(in), exponent,
+                                                            scalar_is_base, n);
+}
+
+template <typename T>
+void PowBackwardTyped(void *grad_in, const void *grad_out, const void *in, float exponent, bool scalar_is_base,
+                      int64_t n, cnrtQueue_t queue) {
+    PowBackwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<T *>(grad_in),
+                                                             static_cast<const T *>(grad_out),
+                                                             static_cast<const T *>(in), exponent, scalar_is_base, n);
+}
+
+template <typename T>
+void BinaryForwardTyped(void *out, const void *a, const void *b, MluBinaryOp op, MluBroadcastMeta meta, int64_t n,
+                        cnrtQueue_t queue) {
+    BinaryForwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<T *>(out), static_cast<const T *>(a),
+                                                               static_cast<const T *>(b), op, meta, n);
+}
+
+template <typename T>
+void BinaryBackwardTyped(void *grad_a, void *grad_b, const void *grad_out, const void *a, const void *b, MluBinaryOp op,
+                         MluBroadcastMeta meta, int64_t numel_a, int64_t numel_b, int64_t numel_out,
+                         cnrtQueue_t queue) {
+    bool same_shape = true;
+    for (int d = 0; d < meta.ndim; ++d) {
+        if (meta.a_shape[d] != meta.b_shape[d]) {
+            same_shape = false;
+            break;
+        }
+    }
+    if (same_shape) {
+        BinaryBackwardNoBroadcastKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(
+            static_cast<T *>(grad_a), static_cast<T *>(grad_b), static_cast<const T *>(grad_out),
+            static_cast<const T *>(a), static_cast<const T *>(b), op, numel_out);
+        return;
+    }
+    BinaryBackwardReduceKernel<T, true><<<kDim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<T *>(grad_a), static_cast<const T *>(grad_out), static_cast<const T *>(a),
+        static_cast<const T *>(b), op, meta, numel_a, numel_out);
+    BinaryBackwardReduceKernel<T, false><<<kDim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<T *>(grad_b), static_cast<const T *>(grad_out), static_cast<const T *>(a),
+        static_cast<const T *>(b), op, meta, numel_b, numel_out);
+}
+
+template <typename T>
+void ScalarForwardTyped(void *out, const void *in, float scalar, MluBinaryOp op, int64_t n, cnrtQueue_t queue) {
+    ScalarForwardKernel<T>
+        <<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<T *>(out), static_cast<const T *>(in), scalar, op, n);
+}
+
+template <typename T>
+void ScalarBackwardTyped(void *grad_in, const void *grad_out, float scalar, MluBinaryOp op, int64_t n,
+                         cnrtQueue_t queue) {
+    ScalarBackwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<T *>(grad_in),
+                                                                static_cast<const T *>(grad_out), scalar, op, n);
+}
+
+template <typename T>
+void EqualsForwardTyped(void *out, const void *a, const void *b, MluBroadcastMeta meta, int64_t n, cnrtQueue_t queue) {
+    EqualsForwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(static_cast<bool *>(out), static_cast<const T *>(a),
+                                                               static_cast<const T *>(b), meta, n);
+}
+
+template <typename T> T ScalarFromDouble(double v) {
+    // 16 位浮点没有 double 构造函数（static_cast 歧义），经 float 中转
+    if constexpr (std::is_same_v<T, half> || std::is_same_v<T, bfloat16_t>) {
+        return static_cast<T>(static_cast<float>(v));
+    } else {
+        return static_cast<T>(v);
+    }
+}
+
+template <typename T>
+void EqualsScalarForwardTyped(void *out, const void *in, double scalar, int64_t n, cnrtQueue_t queue) {
+    // host 侧直接从 double 转换，整型比较不经 float 避免大数精度损失
+    EqualsScalarForwardKernel<T><<<kDim, cnrtFuncTypeBlock, queue>>>(
+        static_cast<bool *>(out), static_cast<const T *>(in), ScalarFromDouble<T>(scalar), n);
+}
+
+// 浮点三型分发（FP64 已由 host 侧排除）
+#define MLU_EW_FLOAT_SWITCH(fn, ...)                                                                                   \
+    switch (type) {                                                                                                    \
+    case MluScalarType::kF16:                                                                                          \
+        fn<half>(__VA_ARGS__);                                                                                         \
+        return;                                                                                                        \
+    case MluScalarType::kBF16:                                                                                         \
+        fn<bfloat16_t>(__VA_ARGS__);                                                                                   \
+        return;                                                                                                        \
+    case MluScalarType::kF32:                                                                                          \
+        fn<float>(__VA_ARGS__);                                                                                        \
+        return;                                                                                                        \
+    default:                                                                                                           \
+        return;                                                                                                        \
+    }
+
+// 全数值型分发（比较用；FP64 已由 host 侧排除）
+#define MLU_EW_NUMERIC_SWITCH(fn, ...)                                                                                 \
+    switch (type) {                                                                                                    \
+    case MluScalarType::kU8:                                                                                           \
+        fn<uint8_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kI8:                                                                                           \
+        fn<int8_t>(__VA_ARGS__);                                                                                       \
+        return;                                                                                                        \
+    case MluScalarType::kU16:                                                                                          \
+        fn<uint16_t>(__VA_ARGS__);                                                                                     \
+        return;                                                                                                        \
+    case MluScalarType::kI16:                                                                                          \
+        fn<int16_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kU32:                                                                                          \
+        fn<uint32_t>(__VA_ARGS__);                                                                                     \
+        return;                                                                                                        \
+    case MluScalarType::kI32:                                                                                          \
+        fn<int32_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kU64:                                                                                          \
+        fn<uint64_t>(__VA_ARGS__);                                                                                     \
+        return;                                                                                                        \
+    case MluScalarType::kI64:                                                                                          \
+        fn<int64_t>(__VA_ARGS__);                                                                                      \
+        return;                                                                                                        \
+    case MluScalarType::kF16:                                                                                          \
+        fn<half>(__VA_ARGS__);                                                                                         \
+        return;                                                                                                        \
+    case MluScalarType::kBF16:                                                                                         \
+        fn<bfloat16_t>(__VA_ARGS__);                                                                                   \
+        return;                                                                                                        \
+    case MluScalarType::kF32:                                                                                          \
+        fn<float>(__VA_ARGS__);                                                                                        \
+        return;                                                                                                        \
+    default:                                                                                                           \
+        return;                                                                                                        \
+    }
+} // namespace
+
+namespace infini_train::kernels::mlu {
+
+void UnaryForwardLaunch(void *out, const void *in, MluUnaryOp op, MluScalarType type, int64_t num_elements,
+                        cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(UnaryForwardTyped, out, in, op, num_elements, queue)
+}
+
+void UnaryBackwardLaunch(void *grad_in, const void *grad_out, const void *aux, MluUnaryOp op, MluScalarType type,
+                         int64_t num_elements, cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(UnaryBackwardTyped, grad_in, grad_out, aux, op, num_elements, queue)
+}
+
+void PowForwardLaunch(void *out, const void *in, float exponent, bool scalar_is_base, MluScalarType type,
+                      int64_t num_elements, cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(PowForwardTyped, out, in, exponent, scalar_is_base, num_elements, queue)
+}
+
+void PowBackwardLaunch(void *grad_in, const void *grad_out, const void *in, float exponent, bool scalar_is_base,
+                       MluScalarType type, int64_t num_elements, cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(PowBackwardTyped, grad_in, grad_out, in, exponent, scalar_is_base, num_elements, queue)
+}
+
+void BinaryForwardLaunch(void *out, const void *a, const void *b, MluBinaryOp op, MluScalarType type,
+                         MluBroadcastMeta meta, int64_t num_elements, cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(BinaryForwardTyped, out, a, b, op, meta, num_elements, queue)
+}
+
+void BinaryBackwardLaunch(void *grad_a, void *grad_b, const void *grad_out, const void *a, const void *b,
+                          MluBinaryOp op, MluScalarType type, MluBroadcastMeta meta, int64_t numel_a, int64_t numel_b,
+                          int64_t numel_out, cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(BinaryBackwardTyped, grad_a, grad_b, grad_out, a, b, op, meta, numel_a, numel_b, numel_out,
+                        queue)
+}
+
+void ScalarForwardLaunch(void *out, const void *in, float scalar, MluBinaryOp op, MluScalarType type,
+                         int64_t num_elements, cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(ScalarForwardTyped, out, in, scalar, op, num_elements, queue)
+}
+
+void ScalarBackwardLaunch(void *grad_in, const void *grad_out, float scalar, MluBinaryOp op, MluScalarType type,
+                          int64_t num_elements, cnrtQueue_t queue) {
+    MLU_EW_FLOAT_SWITCH(ScalarBackwardTyped, grad_in, grad_out, scalar, op, num_elements, queue)
+}
+
+void EqualsForwardLaunch(void *out, const void *a, const void *b, MluScalarType type, MluBroadcastMeta meta,
+                         int64_t num_elements, cnrtQueue_t queue) {
+    MLU_EW_NUMERIC_SWITCH(EqualsForwardTyped, out, a, b, meta, num_elements, queue)
+}
+
+void EqualsScalarForwardLaunch(void *out, const void *in, double scalar, MluScalarType type, int64_t num_elements,
+                               cnrtQueue_t queue) {
+    MLU_EW_NUMERIC_SWITCH(EqualsScalarForwardTyped, out, in, scalar, num_elements, queue)
+}
+
+} // namespace infini_train::kernels::mlu
