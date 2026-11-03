@@ -95,8 +95,8 @@ foreach(src ${MLU_KERNEL_SOURCES})
     OUTPUT ${obj}
     COMMAND ${CMAKE_COMMAND} -E env NEUWARE_HOME=${NEUWARE_HOME}
       ${CNCC_EXECUTABLE} -std=c++17 -fPIC -c ${src} -o ${obj} ${arch_flags}
-      -I"${CMAKE_CURRENT_SOURCE_DIR}/src"
-      -I"${NEUWARE_HOME}/include"
+      "-I${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "-I${NEUWARE_HOME}/include"
     DEPENDS ${src}
       "${CMAKE_CURRENT_SOURCE_DIR}/src/kernels/mlu_kernel_api.h"
     COMMENT "cncc ${name}.mlu"
